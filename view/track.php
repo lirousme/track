@@ -1,3 +1,17 @@
+<?php
+
+declare(strict_types=1);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!isset($_SESSION['user'])) {
+    header('Location: /index.php?view=login');
+    exit;
+}
+
+?>
 <section class="w-full rounded-2xl border border-slate-800 bg-slate-900/70 p-8 shadow-2xl shadow-slate-950">
     <div class="mb-6 flex items-center justify-between">
         <div>
