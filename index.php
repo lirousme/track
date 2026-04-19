@@ -14,12 +14,12 @@ if (!in_array($view, $allowedViews, true)) {
 $isAuthenticated = isset($_SESSION['user']);
 
 if ($isAuthenticated && $view === 'login') {
-    header('Location: /index.php?view=track');
+    header('Location: /track/index.php?view=track');
     exit;
 }
 
 if (!$isAuthenticated && $view === 'track') {
-    header('Location: /index.php?view=login');
+    header('Location: /track/index.php?view=login');
     exit;
 }
 
