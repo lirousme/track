@@ -8,7 +8,7 @@
         </div>
     <?php endif; ?>
 
-    <form action="/api/login.php" method="post" class="space-y-4">
+    <form action="<?= htmlspecialchars(trackUrl('/api/login.php'), ENT_QUOTES, 'UTF-8'); ?>" method="post" class="space-y-4">
         <div>
             <label for="username" class="mb-1 block text-sm font-medium text-slate-300">Usuário</label>
             <input id="username" name="username" type="text" required
