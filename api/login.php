@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 session_start();
 
+require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/db.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /index.php?view=login');
+    header('Location: ' . trackUrl('/index.php?view=login'));
     exit;
 }
 
@@ -16,7 +17,7 @@ $password = (string) ($_POST['password'] ?? '');
 
 if ($username === '' || $password === '') {
     $_SESSION['flash_error'] = 'Informe usuário e senha.';
-    header('Location: /index.php?view=login');
+    header('Location: ' . trackUrl('/index.php?view=login'));
     exit;
 }
 
@@ -32,15 +33,15 @@ try {
             'username' => $user['username'],
         ];
 
-        header('Location: /index.php?view=track');
+        header('Location: ' . trackUrl('/index.php?view=track'));
         exit;
     }
 
     $_SESSION['flash_error'] = 'Usuário ou senha inválidos.';
-    header('Location: /index.php?view=login');
+    header('Location: ' . trackUrl('/index.php?view=login'));
     exit;
 } catch (Throwable $exception) {
     $_SESSION['flash_error'] = 'Erro ao autenticar. Verifique sua configuração de banco.';
-    header('Location: /index.php?view=login');
+    header('Location: ' . trackUrl('/index.php?view=login'));
     exit;
 }
