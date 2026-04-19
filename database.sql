@@ -1,0 +1,23 @@
+CREATE DATABASE IF NOT EXISTS track_app CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE track_app;
+
+CREATE TABLE IF NOT EXISTS users (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS tracks (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_tracks_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Usuário inicial (senha: senha123)
+INSERT INTO users (username, password_hash)
+VALUES ('admin', '$2y$12$qOThAZzKJVoA/aBP0Tm1X.hM91tGL.d41OrTj9aMkWcac5XID31Pe')
+ON DUPLICATE KEY UPDATE username = VALUES(username);
