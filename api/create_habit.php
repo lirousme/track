@@ -20,7 +20,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $userId = (int) ($_SESSION['user']['id'] ?? 0);
 $title = trim((string) ($_POST['title'] ?? ''));
 $goalTitle = trim((string) ($_POST['goal_title'] ?? ''));
-$notes = trim((string) ($_POST['notes'] ?? ''));
 $parentGoalId = $_POST['parent_goal_id'] ?? '';
 $repetitionType = (string) ($_POST['repetition_type'] ?? 'unlimited');
 $repetitionLimitInput = trim((string) ($_POST['repetition_limit'] ?? ''));
@@ -89,7 +88,6 @@ try {
             user_id INT UNSIGNED NOT NULL,
             goal_id INT UNSIGNED NOT NULL,
             title VARCHAR(120) NOT NULL,
-            notes TEXT NULL,
             repetition_limit INT UNSIGNED NULL,
             repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -131,14 +129,13 @@ try {
     $goalId = (int) db()->lastInsertId();
 
     $habitInsert = db()->prepare(
-        'INSERT INTO habits (user_id, goal_id, title, notes, repetition_limit, repetition_count)
-         VALUES (:user_id, :goal_id, :title, :notes, :repetition_limit, 0)'
+        'INSERT INTO habits (user_id, goal_id, title, repetition_limit, repetition_count)
+         VALUES (:user_id, :goal_id, :title, :repetition_limit, 0)'
     );
     $habitInsert->execute([
         'user_id' => $userId,
         'goal_id' => $goalId,
         'title' => $title,
-        'notes' => $notes !== '' ? $notes : null,
         'repetition_limit' => $repetitionLimit,
     ]);
 

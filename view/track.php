@@ -37,7 +37,6 @@ try {
             user_id INT UNSIGNED NOT NULL,
             goal_id INT UNSIGNED NOT NULL,
             title VARCHAR(120) NOT NULL,
-            notes TEXT NULL,
             repetition_limit INT UNSIGNED NULL,
             repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -73,7 +72,6 @@ try {
         'SELECT
             h.id,
             h.title,
-            h.notes,
             h.repetition_limit,
             h.repetition_count,
             g.title AS goal_title,
@@ -142,10 +140,6 @@ try {
                                             <span class="text-slate-400">(subobjetivo de <?= htmlspecialchars((string) $habit['parent_goal_title'], ENT_QUOTES, 'UTF-8'); ?>)</span>
                                         <?php endif; ?>
                                     </p>
-                                    <?php if (!empty($habit['notes'])): ?>
-                                        <p class="mt-2 text-sm text-slate-400"><?= nl2br(htmlspecialchars((string) $habit['notes'], ENT_QUOTES, 'UTF-8')); ?></p>
-                                    <?php endif; ?>
-
                                     <p class="mt-3 text-xs text-slate-400">
                                         Repetições:
                                         <span class="font-semibold text-slate-200"><?= (int) $habit['repetition_count']; ?></span>
@@ -198,11 +192,6 @@ try {
                         <option value="<?= (int) $goal['id']; ?>"><?= htmlspecialchars((string) $goal['title'], ENT_QUOTES, 'UTF-8'); ?></option>
                     <?php endforeach; ?>
                 </select>
-            </div>
-
-            <div>
-                <label for="notes" class="mb-1 block text-sm text-slate-300">Notas (opcional)</label>
-                <textarea id="notes" name="notes" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"></textarea>
             </div>
 
             <div>
