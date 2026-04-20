@@ -63,6 +63,12 @@ try {
     if (!in_array('intraday_every_unit', $habitColumns, true)) {
         db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
     }
+    if (!in_array('intraday_window_start', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_start TIME NULL AFTER intraday_every_unit');
+    }
+    if (!in_array('intraday_window_end', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_end TIME NULL AFTER intraday_window_start');
+    }
 
     db()->exec(
         'CREATE TABLE IF NOT EXISTS habit_repetition_events (
@@ -93,7 +99,9 @@ try {
             schedule_month_days,
             intraday_mode,
             intraday_every_value,
-            intraday_every_unit
+            intraday_every_unit,
+            intraday_window_start,
+            intraday_window_end
          FROM habits
          WHERE id = :id AND user_id = :user_id
          LIMIT 1
@@ -155,6 +163,31 @@ try {
     $lastCheckAtRaw = $habit['last_check_at'] !== null ? (string) $habit['last_check_at'] : '';
     $lastCheckAt = $lastCheckAtRaw !== '' ? new DateTimeImmutable($lastCheckAtRaw) : null;
     $intradayMode = (string) ($habit['intraday_mode'] ?? 'once');
+    $windowStart = (string) ($habit['intraday_window_start'] ?? '');
+    $windowEnd = (string) ($habit['intraday_window_end'] ?? '');
+
+    if ($windowStart === '' || $windowEnd === '') {
+        db()->rollBack();
+        $_SESSION['flash_error'] = 'Esse hábito não possui janela de horário definida.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    $today = $now->format('Y-m-d');
+    $windowStartAt = new DateTimeImmutable($today . ' ' . $windowStart);
+    $windowEndAt = new DateTimeImmutable($today . ' ' . $windowEnd);
+    if ($windowStartAt >= $windowEndAt) {
+        db()->rollBack();
+        $_SESSION['flash_error'] = 'Janela de horário inválida para esse hábito.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+    if ($now < $windowStartAt || $now > $windowEndAt) {
+        db()->rollBack();
+        $_SESSION['flash_error'] = 'Esse hábito só pode ser marcado dentro da janela configurada.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
 
     if ($intradayMode === 'once') {
         if ($lastCheckAt !== null && $lastCheckAt->format('Y-m-d') === $now->format('Y-m-d')) {
@@ -175,6 +208,13 @@ try {
 
         if ($lastCheckAt !== null && $lastCheckAt->format('Y-m-d') === $now->format('Y-m-d')) {
             $seconds = $everyUnit === 'minute' ? $everyValue * 60 : $everyValue * 3600;
+            $nextAllowedAt = $lastCheckAt->modify('+' . $seconds . ' seconds');
+            if ($nextAllowedAt > $windowEndAt) {
+                db()->rollBack();
+                $_SESSION['flash_error'] = 'O próximo intervalo cai fora da janela de horário deste dia.';
+                header('Location: ' . trackUrl('/index.php?view=track'));
+                exit;
+            }
             if (($now->getTimestamp() - $lastCheckAt->getTimestamp()) < $seconds) {
                 db()->rollBack();
                 $_SESSION['flash_error'] = 'Ainda não passou o intervalo mínimo para um novo check hoje.';

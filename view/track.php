@@ -47,6 +47,8 @@ try {
             repetition_end_at DATETIME NULL,
             next_due_at DATETIME NULL,
             last_check_at DATETIME NULL,
+            intraday_window_start TIME NULL,
+            intraday_window_end TIME NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
@@ -111,6 +113,12 @@ try {
     if (!in_array('intraday_every_unit', $habitColumns, true)) {
         db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
     }
+    if (!in_array('intraday_window_start', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_start TIME NULL AFTER intraday_every_unit');
+    }
+    if (!in_array('intraday_window_end', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_end TIME NULL AFTER intraday_window_start');
+    }
 
     $goalStmt = db()->prepare('SELECT id, title, parent_goal_id FROM goals WHERE user_id = :user_id ORDER BY title ASC');
     $goalStmt->execute(['user_id' => $userId]);
@@ -142,6 +150,10 @@ try {
             h.intraday_mode,
             h.intraday_every_value,
             h.intraday_every_unit,
+            h.intraday_window_start,
+            h.intraday_window_end,
+            h.last_check_at,
+            h.created_at,
             g.parent_goal_id,
             g.title AS goal_title,
             parent.title AS parent_goal_title
@@ -156,6 +168,89 @@ try {
 } catch (Throwable $exception) {
     $loadError = 'Não foi possível carregar os hábitos. Verifique sua configuração de banco de dados.';
 }
+
+$computeNextDueAt = static function (array $habit): ?DateTimeImmutable {
+    $now = new DateTimeImmutable('now');
+    $windowStart = (string) ($habit['intraday_window_start'] ?? '');
+    $windowEnd = (string) ($habit['intraday_window_end'] ?? '');
+    if ($windowStart === '' || $windowEnd === '') {
+        return null;
+    }
+
+    $intradayMode = (string) ($habit['intraday_mode'] ?? 'once');
+    $lastCheckAtRaw = (string) ($habit['last_check_at'] ?? '');
+    $lastCheckAt = $lastCheckAtRaw !== '' ? new DateTimeImmutable($lastCheckAtRaw) : null;
+    $cursorDate = $now->setTime(0, 0);
+    $safety = 0;
+
+    while ($safety < 370) {
+        $safety++;
+        $dayOfMonth = (int) $cursorDate->format('j');
+        $isoWeekDay = (int) $cursorDate->format('N');
+        $isCycleMatch = false;
+        $cycleKind = (string) ($habit['schedule_cycle_kind'] ?? 'every_x_days');
+        if ($cycleKind === 'week_days') {
+            $weekDays = array_filter(explode(',', (string) ($habit['schedule_week_days'] ?? '')));
+            $isCycleMatch = in_array((string) $isoWeekDay, $weekDays, true);
+        } elseif ($cycleKind === 'month_days') {
+            $monthDays = array_filter(explode(',', (string) ($habit['schedule_month_days'] ?? '')));
+            $isCycleMatch = in_array((string) $dayOfMonth, $monthDays, true);
+        } else {
+            $interval = (int) ($habit['schedule_cycle_interval'] ?? 1);
+            $interval = $interval > 0 ? $interval : 1;
+            $createdAt = new DateTimeImmutable((string) ($habit['created_at'] ?? 'now'));
+            $daysDiff = (int) $createdAt->setTime(0, 0)->diff($cursorDate)->format('%a');
+            $isCycleMatch = $daysDiff % $interval === 0;
+        }
+
+        if (!$isCycleMatch) {
+            $cursorDate = $cursorDate->modify('+1 day');
+            continue;
+        }
+
+        $startAt = new DateTimeImmutable($cursorDate->format('Y-m-d') . ' ' . $windowStart);
+        $endAt = new DateTimeImmutable($cursorDate->format('Y-m-d') . ' ' . $windowEnd);
+        if ($startAt >= $endAt) {
+            return null;
+        }
+
+        if ($intradayMode === 'once') {
+            if ($lastCheckAt !== null && $lastCheckAt->format('Y-m-d') === $cursorDate->format('Y-m-d')) {
+                $cursorDate = $cursorDate->modify('+1 day');
+                continue;
+            }
+            if ($now <= $startAt) {
+                return $startAt;
+            }
+            if ($now <= $endAt) {
+                return $now;
+            }
+            $cursorDate = $cursorDate->modify('+1 day');
+            continue;
+        }
+
+        $everyValue = (int) ($habit['intraday_every_value'] ?? 0);
+        $everyUnit = (string) ($habit['intraday_every_unit'] ?? '');
+        if ($everyValue <= 0 || !in_array($everyUnit, ['minute', 'hour'], true)) {
+            return null;
+        }
+        $seconds = $everyUnit === 'minute' ? $everyValue * 60 : $everyValue * 3600;
+        $candidate = $startAt;
+        if ($lastCheckAt !== null && $lastCheckAt->format('Y-m-d') === $cursorDate->format('Y-m-d')) {
+            $candidate = $lastCheckAt->modify('+' . $seconds . ' seconds');
+        } elseif ($now > $startAt) {
+            $elapsed = max(0, $now->getTimestamp() - $startAt->getTimestamp());
+            $steps = (int) ceil($elapsed / $seconds);
+            $candidate = $startAt->modify('+' . ($steps * $seconds) . ' seconds');
+        }
+        if ($candidate <= $endAt) {
+            return $candidate < $now ? $now : $candidate;
+        }
+        $cursorDate = $cursorDate->modify('+1 day');
+    }
+
+    return null;
+};
 
 ?>
 <section class="w-full rounded-2xl border border-slate-800 bg-slate-900/70 p-8 shadow-2xl shadow-slate-950">
@@ -236,6 +331,19 @@ try {
                                             no dia: uma vez
                                         <?php endif; ?>
                                     </p>
+                                    <p class="mt-1 text-xs text-slate-400">
+                                        Janela: <?= htmlspecialchars(substr((string) ($habit['intraday_window_start'] ?? '--:--'), 0, 5), ENT_QUOTES, 'UTF-8'); ?>
+                                        às
+                                        <?= htmlspecialchars(substr((string) ($habit['intraday_window_end'] ?? '--:--'), 0, 5), ENT_QUOTES, 'UTF-8'); ?>
+                                    </p>
+                                    <?php $nextDueAt = $computeNextDueAt($habit); ?>
+                                    <p
+                                        class="mt-2 inline-flex rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-200"
+                                        data-next-due-tag
+                                        data-next-due-at="<?= $nextDueAt?->format(DateTimeInterface::ATOM) ?? ''; ?>"
+                                    >
+                                        <?= $nextDueAt ? 'Próxima repetição em...' : 'Sem próxima repetição disponível'; ?>
+                                    </p>
                                 </div>
 
                                 <div class="flex flex-col items-stretch gap-2">
@@ -254,6 +362,8 @@ try {
                                         data-intraday-mode="<?= htmlspecialchars((string) ($habit['intraday_mode'] ?? 'once'), ENT_QUOTES, 'UTF-8'); ?>"
                                         data-intraday-every-value="<?= $habit['intraday_every_value'] !== null ? (int) $habit['intraday_every_value'] : ''; ?>"
                                         data-intraday-every-unit="<?= htmlspecialchars((string) ($habit['intraday_every_unit'] ?? 'minute'), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-intraday-window-start="<?= htmlspecialchars(substr((string) ($habit['intraday_window_start'] ?? ''), 0, 5), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-intraday-window-end="<?= htmlspecialchars(substr((string) ($habit['intraday_window_end'] ?? ''), 0, 5), ENT_QUOTES, 'UTF-8'); ?>"
                                         aria-label="Configurar hábito"
                                     >
                                         ⚙
@@ -346,6 +456,16 @@ try {
                     <option value="hour">Hora(s)</option>
                 </select>
             </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label for="intraday_window_start" class="mb-1 block text-sm text-slate-300">Início da janela</label>
+                    <input id="intraday_window_start" name="intraday_window_start" type="time" required value="09:00" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                </div>
+                <div>
+                    <label for="intraday_window_end" class="mb-1 block text-sm text-slate-300">Fim da janela</label>
+                    <input id="intraday_window_end" name="intraday_window_end" type="time" required value="18:00" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                </div>
+            </div>
             <div class="flex justify-end gap-3">
                 <button type="button" id="cancelHabitModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
                 <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar hábito</button>
@@ -393,6 +513,10 @@ try {
             <div id="editIntradayIntervalWrap" class="hidden grid grid-cols-2 gap-3">
                 <input id="edit_intraday_every_value" name="intraday_every_value" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Valor">
                 <select id="edit_intraday_every_unit" name="intraday_every_unit" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"><option value="minute">Minuto(s)</option><option value="hour">Hora(s)</option></select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <input id="edit_intraday_window_start" name="intraday_window_start" type="time" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Início">
+                <input id="edit_intraday_window_end" name="intraday_window_end" type="time" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Fim">
             </div>
             <div class="flex justify-end gap-3">
                 <button type="button" id="cancelSubjectivitiesModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
@@ -464,6 +588,8 @@ document.querySelectorAll('.openSubjectivitiesModal').forEach((button) => {
     document.getElementById('edit_intraday_mode').value = button.dataset.intradayMode ?? 'once';
     document.getElementById('edit_intraday_every_value').value = button.dataset.intradayEveryValue ?? '';
     document.getElementById('edit_intraday_every_unit').value = button.dataset.intradayEveryUnit ?? 'minute';
+    document.getElementById('edit_intraday_window_start').value = button.dataset.intradayWindowStart ?? '09:00';
+    document.getElementById('edit_intraday_window_end').value = button.dataset.intradayWindowEnd ?? '18:00';
 
     const weekdays = (button.dataset.scheduleWeekDays ?? '').split(',');
     document.querySelectorAll('.editWeekday').forEach((checkbox) => {
@@ -481,4 +607,35 @@ toggleEditCycle();
 toggleEditIntraday();
 document.getElementById('closeSubjectivitiesModal')?.addEventListener('click', ()=>{subjectivitiesModal?.classList.add('hidden');subjectivitiesModal?.classList.remove('flex');});
 document.getElementById('cancelSubjectivitiesModal')?.addEventListener('click', ()=>{subjectivitiesModal?.classList.add('hidden');subjectivitiesModal?.classList.remove('flex');});
+
+const formatDuration = (totalSeconds) => {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const days = Math.floor(safeSeconds / 86400);
+  const hours = Math.floor((safeSeconds % 86400) / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const hhmmss = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return days > 0 ? `${days}d ${hhmmss}` : hhmmss;
+};
+
+const refreshNextDueCountdowns = () => {
+  const now = new Date();
+  document.querySelectorAll('[data-next-due-tag]').forEach((tag) => {
+    const dueAt = tag.getAttribute('data-next-due-at');
+    if (!dueAt) {
+      tag.textContent = 'Sem próxima repetição disponível';
+      return;
+    }
+    const dueDate = new Date(dueAt);
+    const diffSeconds = Math.floor((dueDate.getTime() - now.getTime()) / 1000);
+    if (diffSeconds <= 0) {
+      tag.textContent = 'Próxima repetição: disponível agora';
+      return;
+    }
+    tag.textContent = `Próxima repetição em ${formatDuration(diffSeconds)}`;
+  });
+};
+
+refreshNextDueCountdowns();
+setInterval(refreshNextDueCountdowns, 1000);
 </script>
