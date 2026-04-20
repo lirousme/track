@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS habits (
     goal_id INT UNSIGNED NOT NULL,
     title VARCHAR(120) NOT NULL,
     notes TEXT NULL,
+    repetition_limit INT UNSIGNED NULL,
+    repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE

@@ -22,6 +22,8 @@ $title = trim((string) ($_POST['title'] ?? ''));
 $goalTitle = trim((string) ($_POST['goal_title'] ?? ''));
 $notes = trim((string) ($_POST['notes'] ?? ''));
 $parentGoalId = $_POST['parent_goal_id'] ?? '';
+$repetitionType = (string) ($_POST['repetition_type'] ?? 'unlimited');
+$repetitionLimitInput = trim((string) ($_POST['repetition_limit'] ?? ''));
 
 if ($title === '' || $goalTitle === '') {
     $_SESSION['flash_error'] = 'Informe o hábito e o objetivo.';
@@ -31,6 +33,27 @@ if ($title === '' || $goalTitle === '') {
 
 if (mb_strlen($title) > 120 || mb_strlen($goalTitle) > 120) {
     $_SESSION['flash_error'] = 'Hábito e objetivo devem ter no máximo 120 caracteres.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+
+$repetitionLimit = null;
+if ($repetitionType === 'limited') {
+    if ($repetitionLimitInput === '') {
+        $_SESSION['flash_error'] = 'Informe o número de repetições para um hábito com limite.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    if (!ctype_digit($repetitionLimitInput) || (int) $repetitionLimitInput <= 0) {
+        $_SESSION['flash_error'] = 'O limite de repetições deve ser um número inteiro maior que zero.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    $repetitionLimit = (int) $repetitionLimitInput;
+} elseif ($repetitionType !== 'unlimited') {
+    $_SESSION['flash_error'] = 'Tipo de repetição inválido.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 }
@@ -67,11 +90,21 @@ try {
             goal_id INT UNSIGNED NOT NULL,
             title VARCHAR(120) NOT NULL,
             notes TEXT NULL,
+            repetition_limit INT UNSIGNED NULL,
+            repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
         ) ENGINE=InnoDB'
     );
+
+    $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('repetition_limit', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER notes');
+    }
+    if (!in_array('repetition_count', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN repetition_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER repetition_limit');
+    }
 
     if ($parentGoalIdValue !== null) {
         $parentCheck = db()->prepare('SELECT id FROM goals WHERE id = :id AND user_id = :user_id LIMIT 1');
@@ -97,12 +130,16 @@ try {
 
     $goalId = (int) db()->lastInsertId();
 
-    $habitInsert = db()->prepare('INSERT INTO habits (user_id, goal_id, title, notes) VALUES (:user_id, :goal_id, :title, :notes)');
+    $habitInsert = db()->prepare(
+        'INSERT INTO habits (user_id, goal_id, title, notes, repetition_limit, repetition_count)
+         VALUES (:user_id, :goal_id, :title, :notes, :repetition_limit, 0)'
+    );
     $habitInsert->execute([
         'user_id' => $userId,
         'goal_id' => $goalId,
         'title' => $title,
         'notes' => $notes !== '' ? $notes : null,
+        'repetition_limit' => $repetitionLimit,
     ]);
 
     db()->commit();
