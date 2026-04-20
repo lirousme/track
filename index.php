@@ -26,7 +26,8 @@ if (!$isAuthenticated && $view === 'track') {
 }
 
 $flashError = $_SESSION['flash_error'] ?? null;
-unset($_SESSION['flash_error']);
+$flashSuccess = $_SESSION['flash_success'] ?? null;
+unset($_SESSION['flash_error'], $_SESSION['flash_success']);
 ?>
 <!doctype html>
 <html lang="pt-BR" class="dark">
