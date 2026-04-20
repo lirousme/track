@@ -30,6 +30,8 @@ $scheduleMonthDaysInput = trim((string) ($_POST['schedule_month_days'] ?? ''));
 $intradayMode = (string) ($_POST['intraday_mode'] ?? 'once');
 $intradayEveryValueInput = trim((string) ($_POST['intraday_every_value'] ?? ''));
 $intradayEveryUnitInput = (string) ($_POST['intraday_every_unit'] ?? 'minute');
+$intradayWindowStart = trim((string) ($_POST['intraday_window_start'] ?? ''));
+$intradayWindowEnd = trim((string) ($_POST['intraday_window_end'] ?? ''));
 
 if ($habitId <= 0) {
     $_SESSION['flash_error'] = 'Hábito inválido.';
@@ -118,6 +120,17 @@ if ($scheduleCycleKind === 'every_x_days') {
 
 $intradayEveryValue = null;
 $intradayEveryUnit = null;
+if (!preg_match('/^\d{2}:\d{2}$/', $intradayWindowStart) || !preg_match('/^\d{2}:\d{2}$/', $intradayWindowEnd)) {
+    $_SESSION['flash_error'] = 'Informe a janela de horário (início e fim).';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+if ($intradayWindowStart >= $intradayWindowEnd) {
+    $_SESSION['flash_error'] = 'O horário de início precisa ser menor que o horário de fim.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+
 if ($intradayMode === 'interval') {
     if (!ctype_digit($intradayEveryValueInput) || (int) $intradayEveryValueInput <= 0) {
         $_SESSION['flash_error'] = 'Informe um intervalo válido para repetições no dia.';
@@ -180,6 +193,12 @@ try {
     }
     if (!in_array('intraday_every_unit', $habitColumns, true)) {
         db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
+    }
+    if (!in_array('intraday_window_start', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_start TIME NULL AFTER intraday_every_unit');
+    }
+    if (!in_array('intraday_window_end', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_end TIME NULL AFTER intraday_window_start');
     }
 
     $habitCheck = db()->prepare(
@@ -259,6 +278,8 @@ try {
             intraday_mode = :intraday_mode,
             intraday_every_value = :intraday_every_value,
             intraday_every_unit = :intraday_every_unit,
+            intraday_window_start = :intraday_window_start,
+            intraday_window_end = :intraday_window_end,
             next_due_at = NULL,
             repetition_start_at = NULL,
             repetition_end_at = NULL
@@ -275,6 +296,8 @@ try {
         'intraday_mode' => $intradayMode,
         'intraday_every_value' => $intradayEveryValue,
         'intraday_every_unit' => $intradayEveryUnit,
+        'intraday_window_start' => $intradayWindowStart . ':00',
+        'intraday_window_end' => $intradayWindowEnd . ':00',
         'id' => $habitId,
         'user_id' => $userId,
     ]);

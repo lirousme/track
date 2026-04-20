@@ -29,6 +29,8 @@ $scheduleMonthDaysInput = trim((string) ($_POST['schedule_month_days'] ?? ''));
 $intradayMode = (string) ($_POST['intraday_mode'] ?? 'once');
 $intradayEveryValueInput = trim((string) ($_POST['intraday_every_value'] ?? ''));
 $intradayEveryUnitInput = (string) ($_POST['intraday_every_unit'] ?? 'minute');
+$intradayWindowStart = trim((string) ($_POST['intraday_window_start'] ?? ''));
+$intradayWindowEnd = trim((string) ($_POST['intraday_window_end'] ?? ''));
 
 if ($title === '' || $goalTitle === '') {
     $_SESSION['flash_error'] = 'Informe o hábito e o objetivo.';
@@ -111,6 +113,17 @@ if ($scheduleCycleKind === 'every_x_days') {
 
 $intradayEveryValue = null;
 $intradayEveryUnit = null;
+if (!preg_match('/^\d{2}:\d{2}$/', $intradayWindowStart) || !preg_match('/^\d{2}:\d{2}$/', $intradayWindowEnd)) {
+    $_SESSION['flash_error'] = 'Informe a janela de horário (início e fim).';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+if ($intradayWindowStart >= $intradayWindowEnd) {
+    $_SESSION['flash_error'] = 'O horário de início precisa ser menor que o horário de fim.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+
 if ($intradayMode === 'interval') {
     if (!ctype_digit($intradayEveryValueInput) || (int) $intradayEveryValueInput <= 0) {
         $_SESSION['flash_error'] = 'Informe um intervalo válido para repetições no dia.';
@@ -178,6 +191,8 @@ try {
             intraday_mode ENUM('once','interval') NOT NULL DEFAULT 'once',
             intraday_every_value INT UNSIGNED NULL,
             intraday_every_unit ENUM('minute','hour') NULL,
+            intraday_window_start TIME NULL,
+            intraday_window_end TIME NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
@@ -221,6 +236,12 @@ try {
     if (!in_array('intraday_every_unit', $habitColumns, true)) {
         db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
     }
+    if (!in_array('intraday_window_start', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_start TIME NULL AFTER intraday_every_unit');
+    }
+    if (!in_array('intraday_window_end', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_window_end TIME NULL AFTER intraday_window_start');
+    }
 
     if ($parentGoalIdValue !== null) {
         $parentCheck = db()->prepare('SELECT id FROM goals WHERE id = :id AND user_id = :user_id LIMIT 1');
@@ -262,7 +283,9 @@ try {
             schedule_month_days,
             intraday_mode,
             intraday_every_value,
-            intraday_every_unit
+            intraday_every_unit,
+            intraday_window_start,
+            intraday_window_end
          ) VALUES (
             :user_id,
             :goal_id,
@@ -278,7 +301,9 @@ try {
             :schedule_month_days,
             :intraday_mode,
             :intraday_every_value,
-            :intraday_every_unit
+            :intraday_every_unit,
+            :intraday_window_start,
+            :intraday_window_end
          )'
     );
     $habitInsert->execute([
@@ -294,6 +319,8 @@ try {
         'intraday_mode' => $intradayMode,
         'intraday_every_value' => $intradayEveryValue,
         'intraday_every_unit' => $intradayEveryUnit,
+        'intraday_window_start' => $intradayWindowStart . ':00',
+        'intraday_window_end' => $intradayWindowEnd . ':00',
     ]);
 
     db()->commit();
