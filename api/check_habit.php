@@ -30,9 +30,6 @@ try {
     db()->beginTransaction();
 
     $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
-    if (!in_array('subjectivities', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN subjectivities TEXT NULL AFTER title');
-    }
     if (!in_array('repetition_limit', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER subjectivities');
     }
@@ -42,23 +39,29 @@ try {
     if (!in_array('repetition_kind', $habitColumns, true)) {
         db()->exec("ALTER TABLE habits ADD COLUMN repetition_kind ENUM('unlimited','count_limit','interval') NOT NULL DEFAULT 'unlimited' AFTER subjectivities");
     }
-    if (!in_array('repetition_every_value', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_every_value INT UNSIGNED NULL AFTER repetition_count');
-    }
-    if (!in_array('repetition_every_unit', $habitColumns, true)) {
-        db()->exec("ALTER TABLE habits ADD COLUMN repetition_every_unit ENUM('minute','hour','day') NULL AFTER repetition_every_value");
-    }
-    if (!in_array('repetition_start_at', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_start_at DATETIME NULL AFTER repetition_every_unit');
-    }
-    if (!in_array('repetition_end_at', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_end_at DATETIME NULL AFTER repetition_start_at');
-    }
-    if (!in_array('next_due_at', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN next_due_at DATETIME NULL AFTER repetition_end_at');
-    }
     if (!in_array('last_check_at', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN last_check_at DATETIME NULL AFTER next_due_at');
+    }
+    if (!in_array('schedule_cycle_kind', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN schedule_cycle_kind ENUM('every_x_days','week_days','month_days') NOT NULL DEFAULT 'every_x_days' AFTER last_check_at");
+    }
+    if (!in_array('schedule_cycle_interval', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_cycle_interval INT UNSIGNED NULL AFTER schedule_cycle_kind');
+    }
+    if (!in_array('schedule_week_days', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_week_days VARCHAR(32) NULL AFTER schedule_cycle_interval');
+    }
+    if (!in_array('schedule_month_days', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_month_days VARCHAR(128) NULL AFTER schedule_week_days');
+    }
+    if (!in_array('intraday_mode', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN intraday_mode ENUM('once','interval') NOT NULL DEFAULT 'once' AFTER schedule_month_days");
+    }
+    if (!in_array('intraday_every_value', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_every_value INT UNSIGNED NULL AFTER intraday_mode');
+    }
+    if (!in_array('intraday_every_unit', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
     }
 
     db()->exec(
@@ -82,10 +85,15 @@ try {
             repetition_kind,
             repetition_limit,
             repetition_count,
-            repetition_every_value,
-            repetition_every_unit,
-            repetition_end_at,
-            next_due_at
+            created_at,
+            last_check_at,
+            schedule_cycle_kind,
+            schedule_cycle_interval,
+            schedule_week_days,
+            schedule_month_days,
+            intraday_mode,
+            intraday_every_value,
+            intraday_every_unit
          FROM habits
          WHERE id = :id AND user_id = :user_id
          LIMIT 1
@@ -106,72 +114,90 @@ try {
 
     $repetitionKind = (string) ($habit['repetition_kind'] ?? 'unlimited');
     $repetitionLimit = $habit['repetition_limit'] !== null ? (int) $habit['repetition_limit'] : null;
-    $repetitionCount = (int) $habit['repetition_count'];
+    $repetitionCount = (int) ($habit['repetition_count'] ?? 0);
     $now = new DateTimeImmutable('now');
 
-    if ($repetitionKind === 'count_limit' && $repetitionLimit !== null && $repetitionCount >= $repetitionLimit) {
+    if (($repetitionKind === 'count_limit' || $repetitionLimit !== null) && $repetitionLimit !== null && $repetitionCount >= $repetitionLimit) {
         db()->rollBack();
         $_SESSION['flash_error'] = 'Esse hábito já atingiu o limite de repetições.';
         header('Location: ' . trackUrl('/index.php?view=track'));
         exit;
     }
 
-    $nextDueAtUpdate = null;
-    if ($repetitionKind === 'interval') {
-        $everyValue = $habit['repetition_every_value'] !== null ? (int) $habit['repetition_every_value'] : null;
-        $everyUnit = (string) ($habit['repetition_every_unit'] ?? '');
-        $currentNextDueAtRaw = $habit['next_due_at'] !== null ? (string) $habit['next_due_at'] : '';
-        $endAtRaw = $habit['repetition_end_at'] !== null ? (string) $habit['repetition_end_at'] : '';
+    $cycleKind = (string) ($habit['schedule_cycle_kind'] ?? 'every_x_days');
+    $todayDayOfMonth = (int) $now->format('j');
+    $todayIsoWeekDay = (int) $now->format('N');
 
-        if ($everyValue === null || $everyValue <= 0 || !in_array($everyUnit, ['minute', 'hour', 'day'], true) || $currentNextDueAtRaw === '') {
+    $isCycleMatch = false;
+    if ($cycleKind === 'every_x_days') {
+        $interval = (int) ($habit['schedule_cycle_interval'] ?? 1);
+        if ($interval <= 0) {
+            $interval = 1;
+        }
+        $createdAt = new DateTimeImmutable((string) $habit['created_at']);
+        $daysDiff = (int) $createdAt->setTime(0, 0)->diff($now->setTime(0, 0))->format('%a');
+        $isCycleMatch = $daysDiff % $interval === 0;
+    } elseif ($cycleKind === 'week_days') {
+        $weekDays = array_filter(explode(',', (string) ($habit['schedule_week_days'] ?? '')));
+        $isCycleMatch = in_array((string) $todayIsoWeekDay, $weekDays, true);
+    } elseif ($cycleKind === 'month_days') {
+        $monthDays = array_filter(explode(',', (string) ($habit['schedule_month_days'] ?? '')));
+        $isCycleMatch = in_array((string) $todayDayOfMonth, $monthDays, true);
+    }
+
+    if (!$isCycleMatch) {
+        db()->rollBack();
+        $_SESSION['flash_error'] = 'Hoje não é um dia válido para esse hábito.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    $lastCheckAtRaw = $habit['last_check_at'] !== null ? (string) $habit['last_check_at'] : '';
+    $lastCheckAt = $lastCheckAtRaw !== '' ? new DateTimeImmutable($lastCheckAtRaw) : null;
+    $intradayMode = (string) ($habit['intraday_mode'] ?? 'once');
+
+    if ($intradayMode === 'once') {
+        if ($lastCheckAt !== null && $lastCheckAt->format('Y-m-d') === $now->format('Y-m-d')) {
             db()->rollBack();
-            $_SESSION['flash_error'] = 'Esse hábito tem configuração de intervalo inválida.';
+            $_SESSION['flash_error'] = 'Esse hábito já foi marcado hoje.';
+            header('Location: ' . trackUrl('/index.php?view=track'));
+            exit;
+        }
+    } elseif ($intradayMode === 'interval') {
+        $everyValue = (int) ($habit['intraday_every_value'] ?? 0);
+        $everyUnit = (string) ($habit['intraday_every_unit'] ?? '');
+        if ($everyValue <= 0 || !in_array($everyUnit, ['minute', 'hour'], true)) {
+            db()->rollBack();
+            $_SESSION['flash_error'] = 'Esse hábito tem intervalo no dia inválido.';
             header('Location: ' . trackUrl('/index.php?view=track'));
             exit;
         }
 
-        $currentNextDueAt = new DateTimeImmutable($currentNextDueAtRaw);
-        if ($now < $currentNextDueAt) {
-            db()->rollBack();
-            $_SESSION['flash_error'] = 'Esse hábito ainda não está disponível para check.';
-            header('Location: ' . trackUrl('/index.php?view=track'));
-            exit;
+        if ($lastCheckAt !== null && $lastCheckAt->format('Y-m-d') === $now->format('Y-m-d')) {
+            $seconds = $everyUnit === 'minute' ? $everyValue * 60 : $everyValue * 3600;
+            if (($now->getTimestamp() - $lastCheckAt->getTimestamp()) < $seconds) {
+                db()->rollBack();
+                $_SESSION['flash_error'] = 'Ainda não passou o intervalo mínimo para um novo check hoje.';
+                header('Location: ' . trackUrl('/index.php?view=track'));
+                exit;
+            }
         }
-
-        if ($endAtRaw !== '' && $now > new DateTimeImmutable($endAtRaw)) {
-            db()->rollBack();
-            $_SESSION['flash_error'] = 'Esse hábito já passou da data final de repetição.';
-            header('Location: ' . trackUrl('/index.php?view=track'));
-            exit;
-        }
-
-        if ($everyUnit === 'minute') {
-            $interval = new DateInterval('PT' . $everyValue . 'M');
-        } elseif ($everyUnit === 'hour') {
-            $interval = new DateInterval('PT' . $everyValue . 'H');
-        } else {
-            $interval = new DateInterval('P' . $everyValue . 'D');
-        }
-
-        $nextDueAt = $currentNextDueAt->add($interval);
-        while ($nextDueAt <= $now) {
-            $nextDueAt = $nextDueAt->add($interval);
-        }
-
-        $nextDueAtUpdate = $nextDueAt->format('Y-m-d H:i:s');
+    } else {
+        db()->rollBack();
+        $_SESSION['flash_error'] = 'Configuração de repetição no dia inválida.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
     }
 
     $updateStmt = db()->prepare(
         'UPDATE habits
          SET
             repetition_count = repetition_count + 1,
-            last_check_at = :last_check_at,
-            next_due_at = :next_due_at
+            last_check_at = :last_check_at
          WHERE id = :id AND user_id = :user_id'
     );
     $updateStmt->execute([
         'last_check_at' => $now->format('Y-m-d H:i:s'),
-        'next_due_at' => $nextDueAtUpdate,
         'id' => $habitId,
         'user_id' => $userId,
     ]);

@@ -21,12 +21,14 @@ $userId = (int) ($_SESSION['user']['id'] ?? 0);
 $title = trim((string) ($_POST['title'] ?? ''));
 $goalTitle = trim((string) ($_POST['goal_title'] ?? ''));
 $parentGoalId = $_POST['parent_goal_id'] ?? '';
-$repetitionType = (string) ($_POST['repetition_type'] ?? 'unlimited');
 $repetitionLimitInput = trim((string) ($_POST['repetition_limit'] ?? ''));
-$repetitionEveryValueInput = trim((string) ($_POST['repetition_every_value'] ?? ''));
-$repetitionEveryUnitInput = (string) ($_POST['repetition_every_unit'] ?? '');
-$repetitionStartAtInput = trim((string) ($_POST['repetition_start_at'] ?? ''));
-$repetitionEndAtInput = trim((string) ($_POST['repetition_end_at'] ?? ''));
+$scheduleCycleKind = (string) ($_POST['schedule_cycle_kind'] ?? 'every_x_days');
+$scheduleCycleEveryDaysInput = trim((string) ($_POST['schedule_cycle_every_days'] ?? ''));
+$scheduleWeekDaysInput = $_POST['schedule_week_days'] ?? [];
+$scheduleMonthDaysInput = trim((string) ($_POST['schedule_month_days'] ?? ''));
+$intradayMode = (string) ($_POST['intraday_mode'] ?? 'once');
+$intradayEveryValueInput = trim((string) ($_POST['intraday_every_value'] ?? ''));
+$intradayEveryUnitInput = (string) ($_POST['intraday_every_unit'] ?? 'minute');
 
 if ($title === '' || $goalTitle === '') {
     $_SESSION['flash_error'] = 'Informe o hábito e o objetivo.';
@@ -40,81 +42,90 @@ if (mb_strlen($title) > 120 || mb_strlen($goalTitle) > 120) {
     exit;
 }
 
-$repetitionKind = 'unlimited';
 $repetitionLimit = null;
-$repetitionEveryValue = null;
-$repetitionEveryUnit = null;
-$repetitionStartAt = null;
-$repetitionEndAt = null;
-$nextDueAt = null;
-if ($repetitionType === 'limited') {
-    $repetitionKind = 'count_limit';
-    if ($repetitionLimitInput === '') {
-        $_SESSION['flash_error'] = 'Informe o número de repetições para um hábito com limite.';
-        header('Location: ' . trackUrl('/index.php?view=track'));
-        exit;
-    }
-
+$repetitionKind = 'unlimited';
+if ($repetitionLimitInput !== '') {
     if (!ctype_digit($repetitionLimitInput) || (int) $repetitionLimitInput <= 0) {
         $_SESSION['flash_error'] = 'O limite de repetições deve ser um número inteiro maior que zero.';
         header('Location: ' . trackUrl('/index.php?view=track'));
         exit;
     }
-
     $repetitionLimit = (int) $repetitionLimitInput;
-} elseif ($repetitionType === 'interval') {
-    $repetitionKind = 'interval';
+    $repetitionKind = 'count_limit';
+}
 
-    if (!ctype_digit($repetitionEveryValueInput) || (int) $repetitionEveryValueInput <= 0) {
-        $_SESSION['flash_error'] = 'Informe um intervalo válido (valor inteiro maior que zero).';
+$scheduleCycleInterval = null;
+$scheduleWeekDays = null;
+$scheduleMonthDays = null;
+if ($scheduleCycleKind === 'every_x_days') {
+    if (!ctype_digit($scheduleCycleEveryDaysInput) || (int) $scheduleCycleEveryDaysInput <= 0) {
+        $_SESSION['flash_error'] = 'Informe um intervalo válido de dias (inteiro maior que zero).';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+    $scheduleCycleInterval = (int) $scheduleCycleEveryDaysInput;
+} elseif ($scheduleCycleKind === 'week_days') {
+    if (!is_array($scheduleWeekDaysInput)) {
+        $scheduleWeekDaysInput = [];
+    }
+    $allowedWeekDays = ['1','2','3','4','5','6','7'];
+    $selected = array_values(array_unique(array_filter(array_map('strval', $scheduleWeekDaysInput), static fn(string $day): bool => in_array($day, $allowedWeekDays, true))));
+    if ($selected === []) {
+        $_SESSION['flash_error'] = 'Selecione pelo menos um dia da semana.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+    sort($selected);
+    $scheduleWeekDays = implode(',', $selected);
+} elseif ($scheduleCycleKind === 'month_days') {
+    if ($scheduleMonthDaysInput === '') {
+        $_SESSION['flash_error'] = 'Informe os dias do mês (ex.: 1,15,30).';
         header('Location: ' . trackUrl('/index.php?view=track'));
         exit;
     }
 
-    if (!in_array($repetitionEveryUnitInput, ['minute', 'hour', 'day'], true)) {
-        $_SESSION['flash_error'] = 'Selecione a unidade do intervalo (minuto, hora ou dia).';
-        header('Location: ' . trackUrl('/index.php?view=track'));
-        exit;
-    }
-
-    if ($repetitionStartAtInput === '') {
-        $_SESSION['flash_error'] = 'Informe a data e hora de início para repetição por intervalo.';
-        header('Location: ' . trackUrl('/index.php?view=track'));
-        exit;
-    }
-
-    $startAtDate = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $repetitionStartAtInput);
-    $startAtErrors = DateTimeImmutable::getLastErrors();
-    if ($startAtDate === false || (($startAtErrors['warning_count'] ?? 0) > 0) || (($startAtErrors['error_count'] ?? 0) > 0)) {
-        $_SESSION['flash_error'] = 'A data e hora de início são inválidas.';
-        header('Location: ' . trackUrl('/index.php?view=track'));
-        exit;
-    }
-
-    $endAtDate = null;
-    if ($repetitionEndAtInput !== '') {
-        $endAtDate = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $repetitionEndAtInput);
-        $endAtErrors = DateTimeImmutable::getLastErrors();
-        if ($endAtDate === false || (($endAtErrors['warning_count'] ?? 0) > 0) || (($endAtErrors['error_count'] ?? 0) > 0)) {
-            $_SESSION['flash_error'] = 'A data e hora de término são inválidas.';
-            header('Location: ' . trackUrl('/index.php?view=track'));
-            exit;
+    $monthDaysParts = preg_split('/\s*,\s*/', $scheduleMonthDaysInput) ?: [];
+    $monthDays = [];
+    foreach ($monthDaysParts as $part) {
+        if ($part === '' || !ctype_digit($part)) {
+            continue;
         }
-
-        if ($endAtDate <= $startAtDate) {
-            $_SESSION['flash_error'] = 'A data e hora de término devem ser posteriores ao início.';
-            header('Location: ' . trackUrl('/index.php?view=track'));
-            exit;
+        $value = (int) $part;
+        if ($value >= 1 && $value <= 31) {
+            $monthDays[] = (string) $value;
         }
     }
+    $monthDays = array_values(array_unique($monthDays));
+    sort($monthDays);
+    if ($monthDays === []) {
+        $_SESSION['flash_error'] = 'Os dias do mês devem estar entre 1 e 31.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+    $scheduleMonthDays = implode(',', $monthDays);
+} else {
+    $_SESSION['flash_error'] = 'Configuração de repetição inválida.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
 
-    $repetitionEveryValue = (int) $repetitionEveryValueInput;
-    $repetitionEveryUnit = $repetitionEveryUnitInput;
-    $repetitionStartAt = $startAtDate->format('Y-m-d H:i:s');
-    $repetitionEndAt = $endAtDate?->format('Y-m-d H:i:s');
-    $nextDueAt = $repetitionStartAt;
-} elseif ($repetitionType !== 'unlimited') {
-    $_SESSION['flash_error'] = 'Tipo de repetição inválido.';
+$intradayEveryValue = null;
+$intradayEveryUnit = null;
+if ($intradayMode === 'interval') {
+    if (!ctype_digit($intradayEveryValueInput) || (int) $intradayEveryValueInput <= 0) {
+        $_SESSION['flash_error'] = 'Informe um intervalo válido para repetições no dia.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+    if (!in_array($intradayEveryUnitInput, ['minute', 'hour'], true)) {
+        $_SESSION['flash_error'] = 'Selecione minuto(s) ou hora(s) para repetição no dia.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+    $intradayEveryValue = (int) $intradayEveryValueInput;
+    $intradayEveryUnit = $intradayEveryUnitInput;
+} elseif ($intradayMode !== 'once') {
+    $_SESSION['flash_error'] = 'Configuração de repetição no dia inválida.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 }
@@ -160,15 +171,16 @@ try {
             repetition_end_at DATETIME NULL,
             next_due_at DATETIME NULL,
             last_check_at DATETIME NULL,
+            schedule_cycle_kind ENUM('every_x_days','week_days','month_days') NOT NULL DEFAULT 'every_x_days',
+            schedule_cycle_interval INT UNSIGNED NULL,
+            schedule_week_days VARCHAR(32) NULL,
+            schedule_month_days VARCHAR(128) NULL,
+            intraday_mode ENUM('once','interval') NOT NULL DEFAULT 'once',
+            intraday_every_value INT UNSIGNED NULL,
+            intraday_every_unit ENUM('minute','hour') NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
-            CONSTRAINT chk_habits_interval_value CHECK (
-                repetition_kind <> 'interval' OR (repetition_every_value IS NOT NULL AND repetition_every_value > 0)
-            ),
-            CONSTRAINT chk_habits_interval_unit CHECK (
-                repetition_kind <> 'interval' OR repetition_every_unit IS NOT NULL
-            )
+            CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
         ) ENGINE=InnoDB"
     );
 
@@ -185,23 +197,29 @@ try {
     if (!in_array('repetition_kind', $habitColumns, true)) {
         db()->exec("ALTER TABLE habits ADD COLUMN repetition_kind ENUM('unlimited','count_limit','interval') NOT NULL DEFAULT 'unlimited' AFTER subjectivities");
     }
-    if (!in_array('repetition_every_value', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_every_value INT UNSIGNED NULL AFTER repetition_count');
-    }
-    if (!in_array('repetition_every_unit', $habitColumns, true)) {
-        db()->exec("ALTER TABLE habits ADD COLUMN repetition_every_unit ENUM('minute','hour','day') NULL AFTER repetition_every_value");
-    }
-    if (!in_array('repetition_start_at', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_start_at DATETIME NULL AFTER repetition_every_unit');
-    }
-    if (!in_array('repetition_end_at', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_end_at DATETIME NULL AFTER repetition_start_at');
-    }
-    if (!in_array('next_due_at', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN next_due_at DATETIME NULL AFTER repetition_end_at');
-    }
     if (!in_array('last_check_at', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN last_check_at DATETIME NULL AFTER next_due_at');
+    }
+    if (!in_array('schedule_cycle_kind', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN schedule_cycle_kind ENUM('every_x_days','week_days','month_days') NOT NULL DEFAULT 'every_x_days' AFTER last_check_at");
+    }
+    if (!in_array('schedule_cycle_interval', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_cycle_interval INT UNSIGNED NULL AFTER schedule_cycle_kind');
+    }
+    if (!in_array('schedule_week_days', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_week_days VARCHAR(32) NULL AFTER schedule_cycle_interval');
+    }
+    if (!in_array('schedule_month_days', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_month_days VARCHAR(128) NULL AFTER schedule_week_days');
+    }
+    if (!in_array('intraday_mode', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN intraday_mode ENUM('once','interval') NOT NULL DEFAULT 'once' AFTER schedule_month_days");
+    }
+    if (!in_array('intraday_every_value', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_every_value INT UNSIGNED NULL AFTER intraday_mode');
+    }
+    if (!in_array('intraday_every_unit', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
     }
 
     if ($parentGoalIdValue !== null) {
@@ -237,12 +255,14 @@ try {
             repetition_kind,
             repetition_limit,
             repetition_count,
-            repetition_every_value,
-            repetition_every_unit,
-            repetition_start_at,
-            repetition_end_at,
-            next_due_at,
-            last_check_at
+            last_check_at,
+            schedule_cycle_kind,
+            schedule_cycle_interval,
+            schedule_week_days,
+            schedule_month_days,
+            intraday_mode,
+            intraday_every_value,
+            intraday_every_unit
          ) VALUES (
             :user_id,
             :goal_id,
@@ -251,12 +271,14 @@ try {
             :repetition_kind,
             :repetition_limit,
             0,
-            :repetition_every_value,
-            :repetition_every_unit,
-            :repetition_start_at,
-            :repetition_end_at,
-            :next_due_at,
-            NULL
+            NULL,
+            :schedule_cycle_kind,
+            :schedule_cycle_interval,
+            :schedule_week_days,
+            :schedule_month_days,
+            :intraday_mode,
+            :intraday_every_value,
+            :intraday_every_unit
          )'
     );
     $habitInsert->execute([
@@ -265,11 +287,13 @@ try {
         'title' => $title,
         'repetition_kind' => $repetitionKind,
         'repetition_limit' => $repetitionLimit,
-        'repetition_every_value' => $repetitionEveryValue,
-        'repetition_every_unit' => $repetitionEveryUnit,
-        'repetition_start_at' => $repetitionStartAt,
-        'repetition_end_at' => $repetitionEndAt,
-        'next_due_at' => $nextDueAt,
+        'schedule_cycle_kind' => $scheduleCycleKind,
+        'schedule_cycle_interval' => $scheduleCycleInterval,
+        'schedule_week_days' => $scheduleWeekDays,
+        'schedule_month_days' => $scheduleMonthDays,
+        'intraday_mode' => $intradayMode,
+        'intraday_every_value' => $intradayEveryValue,
+        'intraday_every_unit' => $intradayEveryUnit,
     ]);
 
     db()->commit();
