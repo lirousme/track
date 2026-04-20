@@ -19,7 +19,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $userId = (int) ($_SESSION['user']['id'] ?? 0);
 $habitId = (int) ($_POST['habit_id'] ?? 0);
-$subjectivities = trim((string) ($_POST['subjectivities'] ?? ''));
+$title = trim((string) ($_POST['title'] ?? ''));
+$goalTitle = trim((string) ($_POST['goal_title'] ?? ''));
+$parentGoalId = $_POST['parent_goal_id'] ?? '';
+$repetitionType = (string) ($_POST['repetition_type'] ?? 'unlimited');
+$repetitionLimitInput = trim((string) ($_POST['repetition_limit'] ?? ''));
 
 if ($habitId <= 0) {
     $_SESSION['flash_error'] = 'Hábito inválido.';
@@ -27,47 +31,131 @@ if ($habitId <= 0) {
     exit;
 }
 
-if (mb_strlen($subjectivities) > 2000) {
-    $_SESSION['flash_error'] = 'As subjetividades devem ter no máximo 2000 caracteres.';
+if ($title === '' || $goalTitle === '') {
+    $_SESSION['flash_error'] = 'Informe o hábito e o objetivo.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
+}
+
+if (mb_strlen($title) > 120 || mb_strlen($goalTitle) > 120) {
+    $_SESSION['flash_error'] = 'Hábito e objetivo devem ter no máximo 120 caracteres.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+
+$repetitionLimit = null;
+if ($repetitionType === 'limited') {
+    if ($repetitionLimitInput === '') {
+        $_SESSION['flash_error'] = 'Informe o número de repetições para um hábito com limite.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    if (!ctype_digit($repetitionLimitInput) || (int) $repetitionLimitInput <= 0) {
+        $_SESSION['flash_error'] = 'O limite de repetições deve ser um número inteiro maior que zero.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    $repetitionLimit = (int) $repetitionLimitInput;
+} elseif ($repetitionType !== 'unlimited') {
+    $_SESSION['flash_error'] = 'Tipo de repetição inválido.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+
+$parentGoalIdValue = null;
+if ($parentGoalId !== '' && $parentGoalId !== null) {
+    $parentGoalIdValue = (int) $parentGoalId;
+    if ($parentGoalIdValue <= 0) {
+        $_SESSION['flash_error'] = 'Objetivo pai inválido.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
 }
 
 try {
     db()->beginTransaction();
 
-    $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
-    if (!in_array('subjectivities', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN subjectivities TEXT NULL AFTER title');
-    }
-
-    $habitCheck = db()->prepare('SELECT id FROM habits WHERE id = :id AND user_id = :user_id LIMIT 1 FOR UPDATE');
+    $habitCheck = db()->prepare(
+        'SELECT h.id, h.goal_id, h.repetition_count
+         FROM habits h
+         WHERE h.id = :id AND h.user_id = :user_id
+         LIMIT 1
+         FOR UPDATE'
+    );
     $habitCheck->execute([
         'id' => $habitId,
         'user_id' => $userId,
     ]);
 
-    if (!$habitCheck->fetch()) {
+    $habit = $habitCheck->fetch();
+    if (!$habit) {
         db()->rollBack();
         $_SESSION['flash_error'] = 'Hábito não encontrado.';
         header('Location: ' . trackUrl('/index.php?view=track'));
         exit;
     }
 
+    $goalId = (int) $habit['goal_id'];
+    $repetitionCount = (int) $habit['repetition_count'];
+
+    if ($repetitionLimit !== null && $repetitionCount > $repetitionLimit) {
+        db()->rollBack();
+        $_SESSION['flash_error'] = 'O limite de repetições não pode ser menor que o total já marcado.';
+        header('Location: ' . trackUrl('/index.php?view=track'));
+        exit;
+    }
+
+    if ($parentGoalIdValue !== null) {
+        $goalParentCheck = db()->prepare('SELECT id FROM goals WHERE id = :id AND user_id = :user_id LIMIT 1');
+        $goalParentCheck->execute([
+            'id' => $parentGoalIdValue,
+            'user_id' => $userId,
+        ]);
+
+        if (!$goalParentCheck->fetch()) {
+            db()->rollBack();
+            $_SESSION['flash_error'] = 'O objetivo pai selecionado não existe.';
+            header('Location: ' . trackUrl('/index.php?view=track'));
+            exit;
+        }
+
+        if ($parentGoalIdValue === $goalId) {
+            db()->rollBack();
+            $_SESSION['flash_error'] = 'Um objetivo não pode ser pai dele mesmo.';
+            header('Location: ' . trackUrl('/index.php?view=track'));
+            exit;
+        }
+    }
+
+    $updateGoalStmt = db()->prepare(
+        'UPDATE goals
+         SET title = :title, parent_goal_id = :parent_goal_id
+         WHERE id = :id AND user_id = :user_id'
+    );
+    $updateGoalStmt->execute([
+        'title' => $goalTitle,
+        'parent_goal_id' => $parentGoalIdValue,
+        'id' => $goalId,
+        'user_id' => $userId,
+    ]);
+
     $updateStmt = db()->prepare(
         'UPDATE habits
-         SET subjectivities = :subjectivities
+         SET title = :title, repetition_limit = :repetition_limit
          WHERE id = :id AND user_id = :user_id'
     );
     $updateStmt->execute([
-        'subjectivities' => $subjectivities !== '' ? $subjectivities : null,
+        'title' => $title,
+        'repetition_limit' => $repetitionLimit,
         'id' => $habitId,
         'user_id' => $userId,
     ]);
 
     db()->commit();
 
-    $_SESSION['flash_success'] = 'Subjetividades atualizadas com sucesso.';
+    $_SESSION['flash_success'] = 'Hábito atualizado com sucesso.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 } catch (Throwable $exception) {
@@ -75,7 +163,7 @@ try {
         db()->rollBack();
     }
 
-    $_SESSION['flash_error'] = 'Não foi possível atualizar as subjetividades.';
+    $_SESSION['flash_error'] = 'Não foi possível atualizar o hábito.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 }
