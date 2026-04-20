@@ -90,6 +90,27 @@ try {
     if (!in_array('last_check_at', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN last_check_at DATETIME NULL AFTER next_due_at');
     }
+    if (!in_array('schedule_cycle_kind', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN schedule_cycle_kind ENUM('every_x_days','week_days','month_days') NOT NULL DEFAULT 'every_x_days' AFTER last_check_at");
+    }
+    if (!in_array('schedule_cycle_interval', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_cycle_interval INT UNSIGNED NULL AFTER schedule_cycle_kind');
+    }
+    if (!in_array('schedule_week_days', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_week_days VARCHAR(32) NULL AFTER schedule_cycle_interval');
+    }
+    if (!in_array('schedule_month_days', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN schedule_month_days VARCHAR(128) NULL AFTER schedule_week_days');
+    }
+    if (!in_array('intraday_mode', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN intraday_mode ENUM('once','interval') NOT NULL DEFAULT 'once' AFTER schedule_month_days");
+    }
+    if (!in_array('intraday_every_value', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN intraday_every_value INT UNSIGNED NULL AFTER intraday_mode');
+    }
+    if (!in_array('intraday_every_unit', $habitColumns, true)) {
+        db()->exec("ALTER TABLE habits ADD COLUMN intraday_every_unit ENUM('minute','hour') NULL AFTER intraday_every_value");
+    }
 
     $goalStmt = db()->prepare('SELECT id, title, parent_goal_id FROM goals WHERE user_id = :user_id ORDER BY title ASC');
     $goalStmt->execute(['user_id' => $userId]);
@@ -114,11 +135,13 @@ try {
             h.repetition_kind,
             h.repetition_limit,
             h.repetition_count,
-            h.repetition_every_value,
-            h.repetition_every_unit,
-            h.repetition_start_at,
-            h.repetition_end_at,
-            h.next_due_at,
+            h.schedule_cycle_kind,
+            h.schedule_cycle_interval,
+            h.schedule_week_days,
+            h.schedule_month_days,
+            h.intraday_mode,
+            h.intraday_every_value,
+            h.intraday_every_unit,
             g.parent_goal_id,
             g.title AS goal_title,
             parent.title AS parent_goal_title
@@ -188,31 +211,31 @@ try {
                                     </p>
                                     <p class="mt-3 text-xs text-slate-400">
                                         Repetições: <span class="font-semibold text-slate-200"><?= (int) $habit['repetition_count']; ?></span>
-                                        <?php if (($habit['repetition_kind'] ?? 'unlimited') === 'count_limit' && $habit['repetition_limit'] !== null): ?>
+                                        <?php if ($habit['repetition_limit'] !== null): ?>
                                             / <span class="font-semibold text-slate-200"><?= (int) $habit['repetition_limit']; ?></span>
-                                        <?php elseif (($habit['repetition_kind'] ?? 'unlimited') === 'interval'): ?>
-                                            <span class="text-amber-300">
-                                                (a cada <?= (int) ($habit['repetition_every_value'] ?? 0); ?>
-                                                <?php
-                                                    $unit = (string) ($habit['repetition_every_unit'] ?? '');
-                                                    echo $unit === 'minute' ? 'minuto(s)' : ($unit === 'hour' ? 'hora(s)' : 'dia(s)');
-                                                ?>)
-                                            </span>
                                         <?php else: ?>
-                                            <span class="text-emerald-300">(ilimitado)</span>
+                                            <span class="text-emerald-300">(sem limite)</span>
                                         <?php endif; ?>
                                     </p>
-                                    <?php if (($habit['repetition_kind'] ?? 'unlimited') === 'interval'): ?>
-                                        <p class="mt-1 text-xs text-slate-400">
-                                            Início: <span class="text-slate-200"><?= htmlspecialchars((string) ($habit['repetition_start_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span>
-                                            <?php if (!empty($habit['repetition_end_at'])): ?>
-                                                | Fim: <span class="text-slate-200"><?= htmlspecialchars((string) $habit['repetition_end_at'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                            <?php endif; ?>
-                                            <?php if (!empty($habit['next_due_at'])): ?>
-                                                | Próximo check: <span class="text-brand"><?= htmlspecialchars((string) $habit['next_due_at'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                            <?php endif; ?>
-                                        </p>
-                                    <?php endif; ?>
+                                    <p class="mt-1 text-xs text-slate-400">
+                                        Agenda:
+                                        <?php
+                                            $cycleKind = (string) ($habit['schedule_cycle_kind'] ?? 'every_x_days');
+                                            if ($cycleKind === 'week_days') {
+                                                echo ' dias da semana: ' . htmlspecialchars((string) ($habit['schedule_week_days'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                                            } elseif ($cycleKind === 'month_days') {
+                                                echo ' dias do mês: ' . htmlspecialchars((string) ($habit['schedule_month_days'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                                            } else {
+                                                echo ' a cada ' . (int) ($habit['schedule_cycle_interval'] ?? 1) . ' dia(s)';
+                                            }
+                                        ?>
+                                        |
+                                        <?php if (($habit['intraday_mode'] ?? 'once') === 'interval'): ?>
+                                            no dia: a cada <?= (int) ($habit['intraday_every_value'] ?? 0); ?> <?= (($habit['intraday_every_unit'] ?? 'minute') === 'hour') ? 'hora(s)' : 'minuto(s)'; ?>
+                                        <?php else: ?>
+                                            no dia: uma vez
+                                        <?php endif; ?>
+                                    </p>
                                 </div>
 
                                 <div class="flex items-center gap-2">
@@ -223,12 +246,14 @@ try {
                                         data-habit-title="<?= htmlspecialchars((string) $habit['title'], ENT_QUOTES, 'UTF-8'); ?>"
                                         data-goal-title="<?= htmlspecialchars((string) $habit['goal_title'], ENT_QUOTES, 'UTF-8'); ?>"
                                         data-parent-goal-id="<?= $habit['parent_goal_id'] !== null ? (int) $habit['parent_goal_id'] : ''; ?>"
-                                        data-repetition-kind="<?= htmlspecialchars((string) ($habit['repetition_kind'] ?? 'unlimited'), ENT_QUOTES, 'UTF-8'); ?>"
                                         data-repetition-limit="<?= $habit['repetition_limit'] !== null ? (int) $habit['repetition_limit'] : ''; ?>"
-                                        data-repetition-every-value="<?= $habit['repetition_every_value'] !== null ? (int) $habit['repetition_every_value'] : ''; ?>"
-                                        data-repetition-every-unit="<?= htmlspecialchars((string) ($habit['repetition_every_unit'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                                        data-repetition-start-at="<?= htmlspecialchars((string) ($habit['repetition_start_at'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                                        data-repetition-end-at="<?= htmlspecialchars((string) ($habit['repetition_end_at'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-schedule-cycle-kind="<?= htmlspecialchars((string) ($habit['schedule_cycle_kind'] ?? 'every_x_days'), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-schedule-cycle-interval="<?= $habit['schedule_cycle_interval'] !== null ? (int) $habit['schedule_cycle_interval'] : ''; ?>"
+                                        data-schedule-week-days="<?= htmlspecialchars((string) ($habit['schedule_week_days'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-schedule-month-days="<?= htmlspecialchars((string) ($habit['schedule_month_days'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-intraday-mode="<?= htmlspecialchars((string) ($habit['intraday_mode'] ?? 'once'), ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-intraday-every-value="<?= $habit['intraday_every_value'] !== null ? (int) $habit['intraday_every_value'] : ''; ?>"
+                                        data-intraday-every-unit="<?= htmlspecialchars((string) ($habit['intraday_every_unit'] ?? 'minute'), ENT_QUOTES, 'UTF-8'); ?>"
                                         aria-label="Configurar hábito"
                                     >
                                         ⚙
@@ -262,12 +287,10 @@ try {
                 <label for="title" class="mb-1 block text-sm text-slate-300">Hábito</label>
                 <input id="title" name="title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
             </div>
-
             <div>
                 <label for="goal_title" class="mb-1 block text-sm text-slate-300">Objetivo</label>
                 <input id="goal_title" name="goal_title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
             </div>
-
             <div>
                 <label for="parent_goal_id" class="mb-1 block text-sm text-slate-300">Objetivo pai (opcional)</label>
                 <select id="parent_goal_id" name="parent_goal_id" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
@@ -277,46 +300,45 @@ try {
                     <?php endforeach; ?>
                 </select>
             </div>
-
             <div>
-                <label for="repetition_type" class="mb-1 block text-sm text-slate-300">Repetição</label>
-                <select id="repetition_type" name="repetition_type" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                    <option value="unlimited">Ilimitada</option>
-                    <option value="limited">Com limite</option>
-                    <option value="interval">Por intervalo (data/hora)</option>
-                </select>
-            </div>
-
-            <div id="repetitionLimitWrapper" class="hidden">
-                <label for="repetition_limit" class="mb-1 block text-sm text-slate-300">Limite de repetições</label>
+                <label for="repetition_limit" class="mb-1 block text-sm text-slate-300">Limite total de repetições (opcional)</label>
                 <input id="repetition_limit" name="repetition_limit" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
             </div>
-
-            <div id="repetitionIntervalWrapper" class="hidden space-y-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                        <label for="repetition_every_value" class="mb-1 block text-sm text-slate-300">A cada</label>
-                        <input id="repetition_every_value" name="repetition_every_value" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                    </div>
-                    <div>
-                        <label for="repetition_every_unit" class="mb-1 block text-sm text-slate-300">Unidade</label>
-                        <select id="repetition_every_unit" name="repetition_every_unit" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                            <option value="minute">Minuto(s)</option>
-                            <option value="hour">Hora(s)</option>
-                            <option value="day">Dia(s)</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label for="repetition_start_at" class="mb-1 block text-sm text-slate-300">Início</label>
-                    <input id="repetition_start_at" name="repetition_start_at" type="datetime-local" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                </div>
-                <div>
-                    <label for="repetition_end_at" class="mb-1 block text-sm text-slate-300">Fim (opcional)</label>
-                    <input id="repetition_end_at" name="repetition_end_at" type="datetime-local" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                </div>
+            <div>
+                <label for="schedule_cycle_kind" class="mb-1 block text-sm text-slate-300">Quando repetir</label>
+                <select id="schedule_cycle_kind" name="schedule_cycle_kind" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                    <option value="every_x_days">De X em X dias</option>
+                    <option value="week_days">Dias específicos da semana</option>
+                    <option value="month_days">Dias específicos do mês</option>
+                </select>
             </div>
-
+            <div id="cycleEveryDaysWrap">
+                <label for="schedule_cycle_every_days" class="mb-1 block text-sm text-slate-300">A cada quantos dias</label>
+                <input id="schedule_cycle_every_days" name="schedule_cycle_every_days" type="number" min="1" step="1" value="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            </div>
+            <div id="cycleWeekDaysWrap" class="hidden rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+                <?php foreach ([1 => 'Seg', 2 => 'Ter', 3 => 'Qua', 4 => 'Qui', 5 => 'Sex', 6 => 'Sáb', 7 => 'Dom'] as $dayValue => $dayLabel): ?>
+                    <label class="mr-3 inline-flex items-center gap-1"><input type="checkbox" name="schedule_week_days[]" value="<?= $dayValue; ?>"> <?= $dayLabel; ?></label>
+                <?php endforeach; ?>
+            </div>
+            <div id="cycleMonthDaysWrap" class="hidden">
+                <label for="schedule_month_days" class="mb-1 block text-sm text-slate-300">Dias do mês</label>
+                <input id="schedule_month_days" name="schedule_month_days" type="text" placeholder="Ex.: 1,15,30" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            </div>
+            <div>
+                <label for="intraday_mode" class="mb-1 block text-sm text-slate-300">No dia escolhido</label>
+                <select id="intraday_mode" name="intraday_mode" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                    <option value="once">Uma única vez</option>
+                    <option value="interval">De X em X minutos/horas</option>
+                </select>
+            </div>
+            <div id="intradayIntervalWrap" class="hidden grid grid-cols-2 gap-3">
+                <input id="intraday_every_value" name="intraday_every_value" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Valor">
+                <select id="intraday_every_unit" name="intraday_every_unit" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                    <option value="minute">Minuto(s)</option>
+                    <option value="hour">Hora(s)</option>
+                </select>
+            </div>
             <div class="flex justify-end gap-3">
                 <button type="button" id="cancelHabitModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
                 <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar hábito</button>
@@ -331,71 +353,36 @@ try {
             <h3 class="text-lg font-semibold text-slate-100">Editar hábito</h3>
             <button type="button" id="closeSubjectivitiesModal" class="rounded-md px-2 py-1 text-slate-300 hover:bg-slate-800">✕</button>
         </div>
-
         <p id="subjectivitiesHabitTitle" class="mb-3 text-sm text-slate-400"></p>
 
         <form action="<?= htmlspecialchars(trackUrl('/api/update_habit_subjectivities.php'), ENT_QUOTES, 'UTF-8'); ?>" method="POST" class="space-y-4">
             <input type="hidden" name="habit_id" id="subjectivitiesHabitId">
-
-            <div>
-                <label for="edit_habit_title" class="mb-1 block text-sm text-slate-300">Hábito</label>
-                <input id="edit_habit_title" name="title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            <input id="edit_habit_title" name="title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            <input id="edit_goal_title" name="goal_title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            <select id="edit_parent_goal_id" name="parent_goal_id" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                <option value="">Nenhum</option>
+                <?php foreach ($goals as $goal): ?>
+                    <option value="<?= (int) $goal['id']; ?>"><?= htmlspecialchars((string) $goal['title'], ENT_QUOTES, 'UTF-8'); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <input id="edit_repetition_limit" name="repetition_limit" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Limite total (opcional)">
+            <select id="edit_schedule_cycle_kind" name="schedule_cycle_kind" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                <option value="every_x_days">De X em X dias</option><option value="week_days">Dias da semana</option><option value="month_days">Dias do mês</option>
+            </select>
+            <input id="edit_schedule_cycle_every_days" name="schedule_cycle_every_days" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="A cada X dias">
+            <input id="edit_schedule_month_days" name="schedule_month_days" type="text" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Dias do mês (ex.: 1,15)">
+            <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+                <?php foreach ([1 => 'Seg', 2 => 'Ter', 3 => 'Qua', 4 => 'Qui', 5 => 'Sex', 6 => 'Sáb', 7 => 'Dom'] as $dayValue => $dayLabel): ?>
+                    <label class="mr-3 inline-flex items-center gap-1"><input type="checkbox" name="schedule_week_days[]" value="<?= $dayValue; ?>" class="editWeekday"> <?= $dayLabel; ?></label>
+                <?php endforeach; ?>
             </div>
-
-            <div>
-                <label for="edit_goal_title" class="mb-1 block text-sm text-slate-300">Objetivo</label>
-                <input id="edit_goal_title" name="goal_title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            <select id="edit_intraday_mode" name="intraday_mode" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                <option value="once">Uma única vez</option><option value="interval">De X em X minutos/horas</option>
+            </select>
+            <div class="grid grid-cols-2 gap-3">
+                <input id="edit_intraday_every_value" name="intraday_every_value" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Valor">
+                <select id="edit_intraday_every_unit" name="intraday_every_unit" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"><option value="minute">Minuto(s)</option><option value="hour">Hora(s)</option></select>
             </div>
-
-            <div>
-                <label for="edit_parent_goal_id" class="mb-1 block text-sm text-slate-300">Objetivo pai (opcional)</label>
-                <select id="edit_parent_goal_id" name="parent_goal_id" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                    <option value="">Nenhum</option>
-                    <?php foreach ($goals as $goal): ?>
-                        <option value="<?= (int) $goal['id']; ?>"><?= htmlspecialchars((string) $goal['title'], ENT_QUOTES, 'UTF-8'); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div>
-                <label for="edit_repetition_type" class="mb-1 block text-sm text-slate-300">Repetição</label>
-                <select id="edit_repetition_type" name="repetition_type" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                    <option value="unlimited">Ilimitada</option>
-                    <option value="limited">Com limite</option>
-                    <option value="interval">Por intervalo (data/hora)</option>
-                </select>
-            </div>
-
-            <div id="editRepetitionLimitWrapper" class="hidden">
-                <label for="edit_repetition_limit" class="mb-1 block text-sm text-slate-300">Limite de repetições</label>
-                <input id="edit_repetition_limit" name="repetition_limit" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-            </div>
-
-            <div id="editRepetitionIntervalWrapper" class="hidden space-y-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                        <label for="edit_repetition_every_value" class="mb-1 block text-sm text-slate-300">A cada</label>
-                        <input id="edit_repetition_every_value" name="repetition_every_value" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                    </div>
-                    <div>
-                        <label for="edit_repetition_every_unit" class="mb-1 block text-sm text-slate-300">Unidade</label>
-                        <select id="edit_repetition_every_unit" name="repetition_every_unit" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                            <option value="minute">Minuto(s)</option>
-                            <option value="hour">Hora(s)</option>
-                            <option value="day">Dia(s)</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label for="edit_repetition_start_at" class="mb-1 block text-sm text-slate-300">Início</label>
-                    <input id="edit_repetition_start_at" name="repetition_start_at" type="datetime-local" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                </div>
-                <div>
-                    <label for="edit_repetition_end_at" class="mb-1 block text-sm text-slate-300">Fim (opcional)</label>
-                    <input id="edit_repetition_end_at" name="repetition_end_at" type="datetime-local" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
-                </div>
-            </div>
-
             <div class="flex justify-end gap-3">
                 <button type="button" id="cancelSubjectivitiesModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
                 <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar alterações</button>
@@ -405,214 +392,57 @@ try {
 </div>
 
 <script>
-    const modal = document.getElementById('habitModal');
-    const openButton = document.getElementById('openHabitModal');
-    const closeButton = document.getElementById('closeHabitModal');
-    const cancelButton = document.getElementById('cancelHabitModal');
-    const repetitionType = document.getElementById('repetition_type');
-    const repetitionLimitWrapper = document.getElementById('repetitionLimitWrapper');
-    const repetitionLimitInput = document.getElementById('repetition_limit');
-    const repetitionIntervalWrapper = document.getElementById('repetitionIntervalWrapper');
-    const repetitionEveryValueInput = document.getElementById('repetition_every_value');
-    const repetitionEveryUnitInput = document.getElementById('repetition_every_unit');
-    const repetitionStartAtInput = document.getElementById('repetition_start_at');
-    const repetitionEndAtInput = document.getElementById('repetition_end_at');
-    const subjectivitiesModal = document.getElementById('subjectivitiesModal');
-    const openSubjectivitiesButtons = document.querySelectorAll('.openSubjectivitiesModal');
-    const closeSubjectivitiesModalButton = document.getElementById('closeSubjectivitiesModal');
-    const cancelSubjectivitiesModalButton = document.getElementById('cancelSubjectivitiesModal');
-    const subjectivitiesHabitIdInput = document.getElementById('subjectivitiesHabitId');
-    const editHabitTitleInput = document.getElementById('edit_habit_title');
-    const editGoalTitleInput = document.getElementById('edit_goal_title');
-    const editParentGoalIdInput = document.getElementById('edit_parent_goal_id');
-    const editRepetitionTypeInput = document.getElementById('edit_repetition_type');
-    const editRepetitionLimitWrapper = document.getElementById('editRepetitionLimitWrapper');
-    const editRepetitionLimitInput = document.getElementById('edit_repetition_limit');
-    const editRepetitionIntervalWrapper = document.getElementById('editRepetitionIntervalWrapper');
-    const editRepetitionEveryValueInput = document.getElementById('edit_repetition_every_value');
-    const editRepetitionEveryUnitInput = document.getElementById('edit_repetition_every_unit');
-    const editRepetitionStartAtInput = document.getElementById('edit_repetition_start_at');
-    const editRepetitionEndAtInput = document.getElementById('edit_repetition_end_at');
-    const subjectivitiesHabitTitle = document.getElementById('subjectivitiesHabitTitle');
+const modal = document.getElementById('habitModal');
+const openButton = document.getElementById('openHabitModal');
+const closeButton = document.getElementById('closeHabitModal');
+const cancelButton = document.getElementById('cancelHabitModal');
+const cycleKind = document.getElementById('schedule_cycle_kind');
+const cycleEveryDaysWrap = document.getElementById('cycleEveryDaysWrap');
+const cycleWeekDaysWrap = document.getElementById('cycleWeekDaysWrap');
+const cycleMonthDaysWrap = document.getElementById('cycleMonthDaysWrap');
+const intradayMode = document.getElementById('intraday_mode');
+const intradayIntervalWrap = document.getElementById('intradayIntervalWrap');
 
-    const dbDateToLocalInput = (value) => value ? String(value).replace(' ', 'T').slice(0, 16) : '';
+const toggleCycle = () => {
+  const value = cycleKind?.value;
+  cycleEveryDaysWrap?.classList.toggle('hidden', value !== 'every_x_days');
+  cycleWeekDaysWrap?.classList.toggle('hidden', value !== 'week_days');
+  cycleMonthDaysWrap?.classList.toggle('hidden', value !== 'month_days');
+};
+const toggleIntraday = () => intradayIntervalWrap?.classList.toggle('hidden', intradayMode?.value !== 'interval');
 
-    const openModal = () => {
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-    };
+openButton?.addEventListener('click', ()=>{ modal.classList.remove('hidden'); modal.classList.add('flex'); });
+closeButton?.addEventListener('click', ()=>{ modal.classList.add('hidden'); modal.classList.remove('flex'); });
+cancelButton?.addEventListener('click', ()=>{ modal.classList.add('hidden'); modal.classList.remove('flex'); });
+cycleKind?.addEventListener('change', toggleCycle);
+intradayMode?.addEventListener('change', toggleIntraday);
+toggleCycle(); toggleIntraday();
 
-    const closeModal = () => {
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-    };
+const subjectivitiesModal = document.getElementById('subjectivitiesModal');
+document.querySelectorAll('.openSubjectivitiesModal').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.getElementById('subjectivitiesHabitId').value = button.dataset.habitId ?? '';
+    document.getElementById('edit_habit_title').value = button.dataset.habitTitle ?? '';
+    document.getElementById('edit_goal_title').value = button.dataset.goalTitle ?? '';
+    document.getElementById('edit_parent_goal_id').value = button.dataset.parentGoalId ?? '';
+    document.getElementById('edit_repetition_limit').value = button.dataset.repetitionLimit ?? '';
+    document.getElementById('edit_schedule_cycle_kind').value = button.dataset.scheduleCycleKind ?? 'every_x_days';
+    document.getElementById('edit_schedule_cycle_every_days').value = button.dataset.scheduleCycleInterval ?? '';
+    document.getElementById('edit_schedule_month_days').value = button.dataset.scheduleMonthDays ?? '';
+    document.getElementById('edit_intraday_mode').value = button.dataset.intradayMode ?? 'once';
+    document.getElementById('edit_intraday_every_value').value = button.dataset.intradayEveryValue ?? '';
+    document.getElementById('edit_intraday_every_unit').value = button.dataset.intradayEveryUnit ?? 'minute';
 
-    openButton?.addEventListener('click', openModal);
-    closeButton?.addEventListener('click', closeModal);
-    cancelButton?.addEventListener('click', closeModal);
-
-    modal?.addEventListener('click', (event) => {
-        if (event.target === modal) {
-            closeModal();
-        }
+    const weekdays = (button.dataset.scheduleWeekDays ?? '').split(',');
+    document.querySelectorAll('.editWeekday').forEach((checkbox) => {
+      checkbox.checked = weekdays.includes(checkbox.value);
     });
 
-    const toggleRepetitionLimit = () => {
-        const isLimited = repetitionType?.value === 'limited';
-        const isInterval = repetitionType?.value === 'interval';
-        repetitionLimitWrapper?.classList.toggle('hidden', !isLimited);
-        repetitionIntervalWrapper?.classList.toggle('hidden', !isInterval);
-        if (repetitionLimitInput) {
-            repetitionLimitInput.required = isLimited;
-            if (!isLimited) {
-                repetitionLimitInput.value = '';
-            }
-        }
-        if (repetitionEveryValueInput) {
-            repetitionEveryValueInput.required = isInterval;
-            if (!isInterval) repetitionEveryValueInput.value = '';
-        }
-        if (repetitionEveryUnitInput) {
-            repetitionEveryUnitInput.required = isInterval;
-            if (!isInterval) repetitionEveryUnitInput.value = 'minute';
-        }
-        if (repetitionStartAtInput) {
-            repetitionStartAtInput.required = isInterval;
-            if (!isInterval) repetitionStartAtInput.value = '';
-        }
-        if (repetitionEndAtInput && !isInterval) {
-            repetitionEndAtInput.value = '';
-        }
-    };
-
-    repetitionType?.addEventListener('change', toggleRepetitionLimit);
-    toggleRepetitionLimit();
-
-    const toggleEditRepetitionLimit = () => {
-        const isLimited = editRepetitionTypeInput?.value === 'limited';
-        const isInterval = editRepetitionTypeInput?.value === 'interval';
-        editRepetitionLimitWrapper?.classList.toggle('hidden', !isLimited);
-        editRepetitionIntervalWrapper?.classList.toggle('hidden', !isInterval);
-        if (editRepetitionLimitInput) {
-            editRepetitionLimitInput.required = isLimited;
-            if (!isLimited) {
-                editRepetitionLimitInput.value = '';
-            }
-        }
-        if (editRepetitionEveryValueInput) {
-            editRepetitionEveryValueInput.required = isInterval;
-            if (!isInterval) editRepetitionEveryValueInput.value = '';
-        }
-        if (editRepetitionEveryUnitInput) {
-            editRepetitionEveryUnitInput.required = isInterval;
-            if (!isInterval) editRepetitionEveryUnitInput.value = 'minute';
-        }
-        if (editRepetitionStartAtInput) {
-            editRepetitionStartAtInput.required = isInterval;
-            if (!isInterval) editRepetitionStartAtInput.value = '';
-        }
-        if (editRepetitionEndAtInput && !isInterval) {
-            editRepetitionEndAtInput.value = '';
-        }
-    };
-
-    const openSubjectivitiesModal = (
-        habitId,
-        habitTitle,
-        goalTitle,
-        parentGoalId,
-        repetitionKind,
-        repetitionLimit,
-        repetitionEveryValue,
-        repetitionEveryUnit,
-        repetitionStartAt,
-        repetitionEndAt
-    ) => {
-        if (subjectivitiesHabitIdInput) {
-            subjectivitiesHabitIdInput.value = String(habitId);
-        }
-        if (editHabitTitleInput) {
-            editHabitTitleInput.value = habitTitle ?? '';
-        }
-        if (editGoalTitleInput) {
-            editGoalTitleInput.value = goalTitle ?? '';
-        }
-        if (editParentGoalIdInput) {
-            editParentGoalIdInput.value = parentGoalId ?? '';
-        }
-        if (editRepetitionTypeInput) {
-            if (repetitionKind === 'interval') {
-                editRepetitionTypeInput.value = 'interval';
-            } else if (repetitionKind === 'count_limit') {
-                editRepetitionTypeInput.value = 'limited';
-            } else {
-                editRepetitionTypeInput.value = 'unlimited';
-            }
-        }
-        if (editRepetitionLimitInput) {
-            editRepetitionLimitInput.value = repetitionLimit ?? '';
-        }
-        if (editRepetitionEveryValueInput) {
-            editRepetitionEveryValueInput.value = repetitionEveryValue ?? '';
-        }
-        if (editRepetitionEveryUnitInput) {
-            editRepetitionEveryUnitInput.value = repetitionEveryUnit ?? 'minute';
-        }
-        if (editRepetitionStartAtInput) {
-            editRepetitionStartAtInput.value = dbDateToLocalInput(repetitionStartAt);
-        }
-        if (editRepetitionEndAtInput) {
-            editRepetitionEndAtInput.value = dbDateToLocalInput(repetitionEndAt);
-        }
-        if (subjectivitiesHabitTitle) {
-            subjectivitiesHabitTitle.textContent = `Hábito: ${habitTitle}`;
-        }
-        toggleEditRepetitionLimit();
-
-        subjectivitiesModal?.classList.remove('hidden');
-        subjectivitiesModal?.classList.add('flex');
-    };
-
-    const closeSubjectivitiesModal = () => {
-        subjectivitiesModal?.classList.add('hidden');
-        subjectivitiesModal?.classList.remove('flex');
-    };
-
-    openSubjectivitiesButtons.forEach((button) => {
-        button.addEventListener('click', () => {
-            const habitId = button.dataset.habitId ?? '';
-            const habitTitle = button.dataset.habitTitle ?? '';
-            const goalTitle = button.dataset.goalTitle ?? '';
-            const parentGoalId = button.dataset.parentGoalId ?? '';
-            const repetitionKind = button.dataset.repetitionKind ?? 'unlimited';
-            const repetitionLimit = button.dataset.repetitionLimit ?? '';
-            const repetitionEveryValue = button.dataset.repetitionEveryValue ?? '';
-            const repetitionEveryUnit = button.dataset.repetitionEveryUnit ?? 'minute';
-            const repetitionStartAt = button.dataset.repetitionStartAt ?? '';
-            const repetitionEndAt = button.dataset.repetitionEndAt ?? '';
-            openSubjectivitiesModal(
-                habitId,
-                habitTitle,
-                goalTitle,
-                parentGoalId,
-                repetitionKind,
-                repetitionLimit,
-                repetitionEveryValue,
-                repetitionEveryUnit,
-                repetitionStartAt,
-                repetitionEndAt
-            );
-        });
-    });
-
-    editRepetitionTypeInput?.addEventListener('change', toggleEditRepetitionLimit);
-
-    closeSubjectivitiesModalButton?.addEventListener('click', closeSubjectivitiesModal);
-    cancelSubjectivitiesModalButton?.addEventListener('click', closeSubjectivitiesModal);
-
-    subjectivitiesModal?.addEventListener('click', (event) => {
-        if (event.target === subjectivitiesModal) {
-            closeSubjectivitiesModal();
-        }
-    });
+    document.getElementById('subjectivitiesHabitTitle').textContent = `Hábito: ${button.dataset.habitTitle ?? ''}`;
+    subjectivitiesModal?.classList.remove('hidden');
+    subjectivitiesModal?.classList.add('flex');
+  });
+});
+document.getElementById('closeSubjectivitiesModal')?.addEventListener('click', ()=>{subjectivitiesModal?.classList.add('hidden');subjectivitiesModal?.classList.remove('flex');});
+document.getElementById('cancelSubjectivitiesModal')?.addEventListener('click', ()=>{subjectivitiesModal?.classList.add('hidden');subjectivitiesModal?.classList.remove('flex');});
 </script>
