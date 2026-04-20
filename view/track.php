@@ -76,9 +76,10 @@ try {
         'SELECT
             h.id,
             h.title,
-            h.subjectivities,
+            h.goal_id,
             h.repetition_limit,
             h.repetition_count,
+            g.parent_goal_id,
             g.title AS goal_title,
             parent.title AS parent_goal_title
         FROM habits h
@@ -154,14 +155,6 @@ try {
                                             <span class="text-emerald-300">(ilimitado)</span>
                                         <?php endif; ?>
                                     </p>
-                                    <p class="mt-2 text-xs text-slate-400">
-                                        Subjetividades:
-                                        <?php if (!empty($habit['subjectivities'])): ?>
-                                            <span class="text-slate-200"><?= nl2br(htmlspecialchars((string) $habit['subjectivities'], ENT_QUOTES, 'UTF-8')); ?></span>
-                                        <?php else: ?>
-                                            <span class="text-slate-500">não definidas</span>
-                                        <?php endif; ?>
-                                    </p>
                                 </div>
 
                                 <div class="flex items-center gap-2">
@@ -170,10 +163,12 @@ try {
                                         class="openSubjectivitiesModal rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
                                         data-habit-id="<?= (int) $habit['id']; ?>"
                                         data-habit-title="<?= htmlspecialchars((string) $habit['title'], ENT_QUOTES, 'UTF-8'); ?>"
-                                        data-habit-subjectivities="<?= htmlspecialchars((string) ($habit['subjectivities'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                                        aria-label="Configurar subjetividades do hábito"
+                                        data-goal-title="<?= htmlspecialchars((string) $habit['goal_title'], ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-parent-goal-id="<?= $habit['parent_goal_id'] !== null ? (int) $habit['parent_goal_id'] : ''; ?>"
+                                        data-repetition-limit="<?= $habit['repetition_limit'] !== null ? (int) $habit['repetition_limit'] : ''; ?>"
+                                        aria-label="Configurar hábito"
                                     >
-                                        ⚙ Configurar
+                                        ⚙
                                     </button>
 
                                     <form action="<?= htmlspecialchars(trackUrl('/api/check_habit.php'), ENT_QUOTES, 'UTF-8'); ?>" method="POST">
@@ -244,7 +239,7 @@ try {
 <div id="subjectivitiesModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 p-4">
     <div class="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-slate-950">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-slate-100">Editar subjetividades</h3>
+            <h3 class="text-lg font-semibold text-slate-100">Editar hábito</h3>
             <button type="button" id="closeSubjectivitiesModal" class="rounded-md px-2 py-1 text-slate-300 hover:bg-slate-800">✕</button>
         </div>
 
@@ -254,20 +249,41 @@ try {
             <input type="hidden" name="habit_id" id="subjectivitiesHabitId">
 
             <div>
-                <label for="habit_subjectivities" class="mb-1 block text-sm text-slate-300">Subjetividades</label>
-                <textarea
-                    id="habit_subjectivities"
-                    name="subjectivities"
-                    rows="5"
-                    maxlength="2000"
-                    class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"
-                    placeholder="Ex.: como você quer executar esse hábito, sentimentos esperados, critérios pessoais..."
-                ></textarea>
+                <label for="edit_habit_title" class="mb-1 block text-sm text-slate-300">Hábito</label>
+                <input id="edit_habit_title" name="title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            </div>
+
+            <div>
+                <label for="edit_goal_title" class="mb-1 block text-sm text-slate-300">Objetivo</label>
+                <input id="edit_goal_title" name="goal_title" type="text" maxlength="120" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            </div>
+
+            <div>
+                <label for="edit_parent_goal_id" class="mb-1 block text-sm text-slate-300">Objetivo pai (opcional)</label>
+                <select id="edit_parent_goal_id" name="parent_goal_id" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                    <option value="">Nenhum</option>
+                    <?php foreach ($goals as $goal): ?>
+                        <option value="<?= (int) $goal['id']; ?>"><?= htmlspecialchars((string) $goal['title'], ENT_QUOTES, 'UTF-8'); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div>
+                <label for="edit_repetition_type" class="mb-1 block text-sm text-slate-300">Repetição</label>
+                <select id="edit_repetition_type" name="repetition_type" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                    <option value="unlimited">Ilimitada</option>
+                    <option value="limited">Com limite</option>
+                </select>
+            </div>
+
+            <div id="editRepetitionLimitWrapper" class="hidden">
+                <label for="edit_repetition_limit" class="mb-1 block text-sm text-slate-300">Limite de repetições</label>
+                <input id="edit_repetition_limit" name="repetition_limit" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
             </div>
 
             <div class="flex justify-end gap-3">
                 <button type="button" id="cancelSubjectivitiesModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
-                <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar subjetividades</button>
+                <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar alterações</button>
             </div>
         </form>
     </div>
@@ -286,7 +302,12 @@ try {
     const closeSubjectivitiesModalButton = document.getElementById('closeSubjectivitiesModal');
     const cancelSubjectivitiesModalButton = document.getElementById('cancelSubjectivitiesModal');
     const subjectivitiesHabitIdInput = document.getElementById('subjectivitiesHabitId');
-    const subjectivitiesInput = document.getElementById('habit_subjectivities');
+    const editHabitTitleInput = document.getElementById('edit_habit_title');
+    const editGoalTitleInput = document.getElementById('edit_goal_title');
+    const editParentGoalIdInput = document.getElementById('edit_parent_goal_id');
+    const editRepetitionTypeInput = document.getElementById('edit_repetition_type');
+    const editRepetitionLimitWrapper = document.getElementById('editRepetitionLimitWrapper');
+    const editRepetitionLimitInput = document.getElementById('edit_repetition_limit');
     const subjectivitiesHabitTitle = document.getElementById('subjectivitiesHabitTitle');
 
     const openModal = () => {
@@ -323,16 +344,40 @@ try {
     repetitionType?.addEventListener('change', toggleRepetitionLimit);
     toggleRepetitionLimit();
 
-    const openSubjectivitiesModal = (habitId, habitTitle, habitSubjectivities) => {
+    const toggleEditRepetitionLimit = () => {
+        const isLimited = editRepetitionTypeInput?.value === 'limited';
+        editRepetitionLimitWrapper?.classList.toggle('hidden', !isLimited);
+        if (editRepetitionLimitInput) {
+            editRepetitionLimitInput.required = isLimited;
+            if (!isLimited) {
+                editRepetitionLimitInput.value = '';
+            }
+        }
+    };
+
+    const openSubjectivitiesModal = (habitId, habitTitle, goalTitle, parentGoalId, repetitionLimit) => {
         if (subjectivitiesHabitIdInput) {
             subjectivitiesHabitIdInput.value = String(habitId);
         }
-        if (subjectivitiesInput) {
-            subjectivitiesInput.value = habitSubjectivities ?? '';
+        if (editHabitTitleInput) {
+            editHabitTitleInput.value = habitTitle ?? '';
+        }
+        if (editGoalTitleInput) {
+            editGoalTitleInput.value = goalTitle ?? '';
+        }
+        if (editParentGoalIdInput) {
+            editParentGoalIdInput.value = parentGoalId ?? '';
+        }
+        if (editRepetitionTypeInput) {
+            editRepetitionTypeInput.value = repetitionLimit ? 'limited' : 'unlimited';
+        }
+        if (editRepetitionLimitInput) {
+            editRepetitionLimitInput.value = repetitionLimit ?? '';
         }
         if (subjectivitiesHabitTitle) {
             subjectivitiesHabitTitle.textContent = `Hábito: ${habitTitle}`;
         }
+        toggleEditRepetitionLimit();
 
         subjectivitiesModal?.classList.remove('hidden');
         subjectivitiesModal?.classList.add('flex');
@@ -347,10 +392,14 @@ try {
         button.addEventListener('click', () => {
             const habitId = button.dataset.habitId ?? '';
             const habitTitle = button.dataset.habitTitle ?? '';
-            const habitSubjectivities = button.dataset.habitSubjectivities ?? '';
-            openSubjectivitiesModal(habitId, habitTitle, habitSubjectivities);
+            const goalTitle = button.dataset.goalTitle ?? '';
+            const parentGoalId = button.dataset.parentGoalId ?? '';
+            const repetitionLimit = button.dataset.repetitionLimit ?? '';
+            openSubjectivitiesModal(habitId, habitTitle, goalTitle, parentGoalId, repetitionLimit);
         });
     });
+
+    editRepetitionTypeInput?.addEventListener('change', toggleEditRepetitionLimit);
 
     closeSubjectivitiesModalButton?.addEventListener('click', closeSubjectivitiesModal);
     cancelSubjectivitiesModalButton?.addEventListener('click', closeSubjectivitiesModal);
