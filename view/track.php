@@ -38,11 +38,21 @@ try {
             goal_id INT UNSIGNED NOT NULL,
             title VARCHAR(120) NOT NULL,
             notes TEXT NULL,
+            repetition_limit INT UNSIGNED NULL,
+            repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_habits_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             CONSTRAINT fk_habits_goal FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
         ) ENGINE=InnoDB'
     );
+
+    $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('repetition_limit', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER notes');
+    }
+    if (!in_array('repetition_count', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN repetition_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER repetition_limit');
+    }
 
     $goalStmt = db()->prepare('SELECT id, title, parent_goal_id FROM goals WHERE user_id = :user_id ORDER BY title ASC');
     $goalStmt->execute(['user_id' => $userId]);
@@ -64,6 +74,8 @@ try {
             h.id,
             h.title,
             h.notes,
+            h.repetition_limit,
+            h.repetition_count,
             g.title AS goal_title,
             parent.title AS parent_goal_title
         FROM habits h
@@ -133,7 +145,24 @@ try {
                                     <?php if (!empty($habit['notes'])): ?>
                                         <p class="mt-2 text-sm text-slate-400"><?= nl2br(htmlspecialchars((string) $habit['notes'], ENT_QUOTES, 'UTF-8')); ?></p>
                                     <?php endif; ?>
+
+                                    <p class="mt-3 text-xs text-slate-400">
+                                        Repetições:
+                                        <span class="font-semibold text-slate-200"><?= (int) $habit['repetition_count']; ?></span>
+                                        <?php if ($habit['repetition_limit'] !== null): ?>
+                                            / <span class="font-semibold text-slate-200"><?= (int) $habit['repetition_limit']; ?></span>
+                                        <?php else: ?>
+                                            <span class="text-emerald-300">(ilimitado)</span>
+                                        <?php endif; ?>
+                                    </p>
                                 </div>
+
+                                <form action="<?= htmlspecialchars(trackUrl('/api/check_habit.php'), ENT_QUOTES, 'UTF-8'); ?>" method="POST">
+                                    <input type="hidden" name="habit_id" value="<?= (int) $habit['id']; ?>">
+                                    <button type="submit" class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20">
+                                        ✔ Check
+                                    </button>
+                                </form>
                             </div>
                         </li>
                     <?php endforeach; ?>
@@ -176,6 +205,19 @@ try {
                 <textarea id="notes" name="notes" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"></textarea>
             </div>
 
+            <div>
+                <label for="repetition_type" class="mb-1 block text-sm text-slate-300">Repetição</label>
+                <select id="repetition_type" name="repetition_type" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+                    <option value="unlimited">Ilimitada</option>
+                    <option value="limited">Com limite</option>
+                </select>
+            </div>
+
+            <div id="repetitionLimitWrapper" class="hidden">
+                <label for="repetition_limit" class="mb-1 block text-sm text-slate-300">Limite de repetições</label>
+                <input id="repetition_limit" name="repetition_limit" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+            </div>
+
             <div class="flex justify-end gap-3">
                 <button type="button" id="cancelHabitModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
                 <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar hábito</button>
@@ -189,6 +231,9 @@ try {
     const openButton = document.getElementById('openHabitModal');
     const closeButton = document.getElementById('closeHabitModal');
     const cancelButton = document.getElementById('cancelHabitModal');
+    const repetitionType = document.getElementById('repetition_type');
+    const repetitionLimitWrapper = document.getElementById('repetitionLimitWrapper');
+    const repetitionLimitInput = document.getElementById('repetition_limit');
 
     const openModal = () => {
         modal.classList.remove('hidden');
@@ -209,4 +254,18 @@ try {
             closeModal();
         }
     });
+
+    const toggleRepetitionLimit = () => {
+        const isLimited = repetitionType?.value === 'limited';
+        repetitionLimitWrapper?.classList.toggle('hidden', !isLimited);
+        if (repetitionLimitInput) {
+            repetitionLimitInput.required = isLimited;
+            if (!isLimited) {
+                repetitionLimitInput.value = '';
+            }
+        }
+    };
+
+    repetitionType?.addEventListener('change', toggleRepetitionLimit);
+    toggleRepetitionLimit();
 </script>
