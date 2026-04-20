@@ -369,9 +369,13 @@ try {
             <select id="edit_schedule_cycle_kind" name="schedule_cycle_kind" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
                 <option value="every_x_days">De X em X dias</option><option value="week_days">Dias da semana</option><option value="month_days">Dias do mês</option>
             </select>
-            <input id="edit_schedule_cycle_every_days" name="schedule_cycle_every_days" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="A cada X dias">
-            <input id="edit_schedule_month_days" name="schedule_month_days" type="text" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Dias do mês (ex.: 1,15)">
-            <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+            <div id="editCycleEveryDaysWrap">
+                <input id="edit_schedule_cycle_every_days" name="schedule_cycle_every_days" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="A cada X dias">
+            </div>
+            <div id="editCycleMonthDaysWrap" class="hidden">
+                <input id="edit_schedule_month_days" name="schedule_month_days" type="text" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Dias do mês (ex.: 1,15)">
+            </div>
+            <div id="editCycleWeekDaysWrap" class="hidden rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
                 <?php foreach ([1 => 'Seg', 2 => 'Ter', 3 => 'Qua', 4 => 'Qui', 5 => 'Sex', 6 => 'Sáb', 7 => 'Dom'] as $dayValue => $dayLabel): ?>
                     <label class="mr-3 inline-flex items-center gap-1"><input type="checkbox" name="schedule_week_days[]" value="<?= $dayValue; ?>" class="editWeekday"> <?= $dayLabel; ?></label>
                 <?php endforeach; ?>
@@ -379,7 +383,7 @@ try {
             <select id="edit_intraday_mode" name="intraday_mode" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
                 <option value="once">Uma única vez</option><option value="interval">De X em X minutos/horas</option>
             </select>
-            <div class="grid grid-cols-2 gap-3">
+            <div id="editIntradayIntervalWrap" class="hidden grid grid-cols-2 gap-3">
                 <input id="edit_intraday_every_value" name="intraday_every_value" type="number" min="1" step="1" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Valor">
                 <select id="edit_intraday_every_unit" name="intraday_every_unit" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"><option value="minute">Minuto(s)</option><option value="hour">Hora(s)</option></select>
             </div>
@@ -419,6 +423,27 @@ intradayMode?.addEventListener('change', toggleIntraday);
 toggleCycle(); toggleIntraday();
 
 const subjectivitiesModal = document.getElementById('subjectivitiesModal');
+const editCycleKind = document.getElementById('edit_schedule_cycle_kind');
+const editCycleEveryDaysWrap = document.getElementById('editCycleEveryDaysWrap');
+const editCycleWeekDaysWrap = document.getElementById('editCycleWeekDaysWrap');
+const editCycleMonthDaysWrap = document.getElementById('editCycleMonthDaysWrap');
+const editIntradayMode = document.getElementById('edit_intraday_mode');
+const editIntradayIntervalWrap = document.getElementById('editIntradayIntervalWrap');
+
+const toggleEditCycle = () => {
+  const value = editCycleKind?.value;
+  editCycleEveryDaysWrap?.classList.toggle('hidden', value !== 'every_x_days');
+  editCycleWeekDaysWrap?.classList.toggle('hidden', value !== 'week_days');
+  editCycleMonthDaysWrap?.classList.toggle('hidden', value !== 'month_days');
+};
+
+const toggleEditIntraday = () => {
+  editIntradayIntervalWrap?.classList.toggle('hidden', editIntradayMode?.value !== 'interval');
+};
+
+editCycleKind?.addEventListener('change', toggleEditCycle);
+editIntradayMode?.addEventListener('change', toggleEditIntraday);
+
 document.querySelectorAll('.openSubjectivitiesModal').forEach((button) => {
   button.addEventListener('click', () => {
     document.getElementById('subjectivitiesHabitId').value = button.dataset.habitId ?? '';
@@ -439,10 +464,14 @@ document.querySelectorAll('.openSubjectivitiesModal').forEach((button) => {
     });
 
     document.getElementById('subjectivitiesHabitTitle').textContent = `Hábito: ${button.dataset.habitTitle ?? ''}`;
+    toggleEditCycle();
+    toggleEditIntraday();
     subjectivitiesModal?.classList.remove('hidden');
     subjectivitiesModal?.classList.add('flex');
   });
 });
+toggleEditCycle();
+toggleEditIntraday();
 document.getElementById('closeSubjectivitiesModal')?.addEventListener('click', ()=>{subjectivitiesModal?.classList.add('hidden');subjectivitiesModal?.classList.remove('flex');});
 document.getElementById('cancelSubjectivitiesModal')?.addEventListener('click', ()=>{subjectivitiesModal?.classList.add('hidden');subjectivitiesModal?.classList.remove('flex');});
 </script>
