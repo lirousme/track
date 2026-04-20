@@ -8,6 +8,12 @@
         </div>
     <?php endif; ?>
 
+    <?php if (!empty($flashSuccess)): ?>
+        <div class="mb-4 rounded-lg border border-emerald-400/50 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            <?= htmlspecialchars((string) $flashSuccess, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
+
     <form action="<?= htmlspecialchars(trackUrl('/api/login.php'), ENT_QUOTES, 'UTF-8'); ?>" method="post" class="space-y-4">
         <div>
             <label for="username" class="mb-1 block text-sm font-medium text-slate-300">Usuário</label>
@@ -24,6 +30,30 @@
         <button type="submit"
                 class="w-full rounded-lg bg-brand px-4 py-2 font-semibold text-slate-950 transition hover:brightness-110">
             Login
+        </button>
+    </form>
+
+    <hr class="my-6 border-slate-800">
+
+    <h2 class="mb-2 text-lg font-semibold">Criar conta</h2>
+    <p class="mb-4 text-sm text-slate-400">Cadastre um novo usuário para acessar o sistema.</p>
+
+    <form action="<?= htmlspecialchars(trackUrl('/api/register.php'), ENT_QUOTES, 'UTF-8'); ?>" method="post" class="space-y-4">
+        <div>
+            <label for="register-username" class="mb-1 block text-sm font-medium text-slate-300">Novo usuário</label>
+            <input id="register-username" name="username" type="text" maxlength="50" required
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+        </div>
+
+        <div>
+            <label for="register-password" class="mb-1 block text-sm font-medium text-slate-300">Nova senha</label>
+            <input id="register-password" name="password" type="password" minlength="6" required
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none">
+        </div>
+
+        <button type="submit"
+                class="w-full rounded-lg border border-brand px-4 py-2 font-semibold text-brand transition hover:bg-brand hover:text-slate-950">
+            Criar conta
         </button>
     </form>
 </section>
