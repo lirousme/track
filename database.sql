@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS habits (
     user_id INT UNSIGNED NOT NULL,
     goal_id INT UNSIGNED NOT NULL,
     title VARCHAR(120) NOT NULL,
+    subjectivities TEXT NULL,
     repetition_limit INT UNSIGNED NULL,
     repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

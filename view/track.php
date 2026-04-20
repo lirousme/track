@@ -37,6 +37,7 @@ try {
             user_id INT UNSIGNED NOT NULL,
             goal_id INT UNSIGNED NOT NULL,
             title VARCHAR(120) NOT NULL,
+            subjectivities TEXT NULL,
             repetition_limit INT UNSIGNED NULL,
             repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -46,8 +47,11 @@ try {
     );
 
     $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('subjectivities', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN subjectivities TEXT NULL AFTER title');
+    }
     if (!in_array('repetition_limit', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER notes');
+        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER subjectivities');
     }
     if (!in_array('repetition_count', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN repetition_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER repetition_limit');
@@ -72,6 +76,7 @@ try {
         'SELECT
             h.id,
             h.title,
+            h.subjectivities,
             h.repetition_limit,
             h.repetition_count,
             g.title AS goal_title,
@@ -149,14 +154,35 @@ try {
                                             <span class="text-emerald-300">(ilimitado)</span>
                                         <?php endif; ?>
                                     </p>
+                                    <p class="mt-2 text-xs text-slate-400">
+                                        Subjetividades:
+                                        <?php if (!empty($habit['subjectivities'])): ?>
+                                            <span class="text-slate-200"><?= nl2br(htmlspecialchars((string) $habit['subjectivities'], ENT_QUOTES, 'UTF-8')); ?></span>
+                                        <?php else: ?>
+                                            <span class="text-slate-500">não definidas</span>
+                                        <?php endif; ?>
+                                    </p>
                                 </div>
 
-                                <form action="<?= htmlspecialchars(trackUrl('/api/check_habit.php'), ENT_QUOTES, 'UTF-8'); ?>" method="POST">
-                                    <input type="hidden" name="habit_id" value="<?= (int) $habit['id']; ?>">
-                                    <button type="submit" class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20">
-                                        ✔ Check
+                                <div class="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        class="openSubjectivitiesModal rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
+                                        data-habit-id="<?= (int) $habit['id']; ?>"
+                                        data-habit-title="<?= htmlspecialchars((string) $habit['title'], ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-habit-subjectivities="<?= htmlspecialchars((string) ($habit['subjectivities'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                        aria-label="Configurar subjetividades do hábito"
+                                    >
+                                        ⚙ Configurar
                                     </button>
-                                </form>
+
+                                    <form action="<?= htmlspecialchars(trackUrl('/api/check_habit.php'), ENT_QUOTES, 'UTF-8'); ?>" method="POST">
+                                        <input type="hidden" name="habit_id" value="<?= (int) $habit['id']; ?>">
+                                        <button type="submit" class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20">
+                                            ✔ Check
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
                         </li>
                     <?php endforeach; ?>
@@ -215,6 +241,38 @@ try {
     </div>
 </div>
 
+<div id="subjectivitiesModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 p-4">
+    <div class="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-slate-950">
+        <div class="mb-4 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-slate-100">Editar subjetividades</h3>
+            <button type="button" id="closeSubjectivitiesModal" class="rounded-md px-2 py-1 text-slate-300 hover:bg-slate-800">✕</button>
+        </div>
+
+        <p id="subjectivitiesHabitTitle" class="mb-3 text-sm text-slate-400"></p>
+
+        <form action="<?= htmlspecialchars(trackUrl('/api/update_habit_subjectivities.php'), ENT_QUOTES, 'UTF-8'); ?>" method="POST" class="space-y-4">
+            <input type="hidden" name="habit_id" id="subjectivitiesHabitId">
+
+            <div>
+                <label for="habit_subjectivities" class="mb-1 block text-sm text-slate-300">Subjetividades</label>
+                <textarea
+                    id="habit_subjectivities"
+                    name="subjectivities"
+                    rows="5"
+                    maxlength="2000"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none"
+                    placeholder="Ex.: como você quer executar esse hábito, sentimentos esperados, critérios pessoais..."
+                ></textarea>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button type="button" id="cancelSubjectivitiesModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
+                <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar subjetividades</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
     const modal = document.getElementById('habitModal');
     const openButton = document.getElementById('openHabitModal');
@@ -223,6 +281,13 @@ try {
     const repetitionType = document.getElementById('repetition_type');
     const repetitionLimitWrapper = document.getElementById('repetitionLimitWrapper');
     const repetitionLimitInput = document.getElementById('repetition_limit');
+    const subjectivitiesModal = document.getElementById('subjectivitiesModal');
+    const openSubjectivitiesButtons = document.querySelectorAll('.openSubjectivitiesModal');
+    const closeSubjectivitiesModalButton = document.getElementById('closeSubjectivitiesModal');
+    const cancelSubjectivitiesModalButton = document.getElementById('cancelSubjectivitiesModal');
+    const subjectivitiesHabitIdInput = document.getElementById('subjectivitiesHabitId');
+    const subjectivitiesInput = document.getElementById('habit_subjectivities');
+    const subjectivitiesHabitTitle = document.getElementById('subjectivitiesHabitTitle');
 
     const openModal = () => {
         modal.classList.remove('hidden');
@@ -257,4 +322,42 @@ try {
 
     repetitionType?.addEventListener('change', toggleRepetitionLimit);
     toggleRepetitionLimit();
+
+    const openSubjectivitiesModal = (habitId, habitTitle, habitSubjectivities) => {
+        if (subjectivitiesHabitIdInput) {
+            subjectivitiesHabitIdInput.value = String(habitId);
+        }
+        if (subjectivitiesInput) {
+            subjectivitiesInput.value = habitSubjectivities ?? '';
+        }
+        if (subjectivitiesHabitTitle) {
+            subjectivitiesHabitTitle.textContent = `Hábito: ${habitTitle}`;
+        }
+
+        subjectivitiesModal?.classList.remove('hidden');
+        subjectivitiesModal?.classList.add('flex');
+    };
+
+    const closeSubjectivitiesModal = () => {
+        subjectivitiesModal?.classList.add('hidden');
+        subjectivitiesModal?.classList.remove('flex');
+    };
+
+    openSubjectivitiesButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const habitId = button.dataset.habitId ?? '';
+            const habitTitle = button.dataset.habitTitle ?? '';
+            const habitSubjectivities = button.dataset.habitSubjectivities ?? '';
+            openSubjectivitiesModal(habitId, habitTitle, habitSubjectivities);
+        });
+    });
+
+    closeSubjectivitiesModalButton?.addEventListener('click', closeSubjectivitiesModal);
+    cancelSubjectivitiesModalButton?.addEventListener('click', closeSubjectivitiesModal);
+
+    subjectivitiesModal?.addEventListener('click', (event) => {
+        if (event.target === subjectivitiesModal) {
+            closeSubjectivitiesModal();
+        }
+    });
 </script>

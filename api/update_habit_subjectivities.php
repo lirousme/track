@@ -19,9 +19,16 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $userId = (int) ($_SESSION['user']['id'] ?? 0);
 $habitId = (int) ($_POST['habit_id'] ?? 0);
+$subjectivities = trim((string) ($_POST['subjectivities'] ?? ''));
 
 if ($habitId <= 0) {
     $_SESSION['flash_error'] = 'Hábito inválido.';
+    header('Location: ' . trackUrl('/index.php?view=track'));
+    exit;
+}
+
+if (mb_strlen($subjectivities) > 2000) {
+    $_SESSION['flash_error'] = 'As subjetividades devem ter no máximo 2000 caracteres.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 }
@@ -33,55 +40,34 @@ try {
     if (!in_array('subjectivities', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN subjectivities TEXT NULL AFTER title');
     }
-    if (!in_array('repetition_limit', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER subjectivities');
-    }
-    if (!in_array('repetition_count', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER repetition_limit');
-    }
 
-    $habitStmt = db()->prepare(
-        'SELECT id, repetition_limit, repetition_count
-         FROM habits
-         WHERE id = :id AND user_id = :user_id
-         LIMIT 1
-         FOR UPDATE'
-    );
-    $habitStmt->execute([
+    $habitCheck = db()->prepare('SELECT id FROM habits WHERE id = :id AND user_id = :user_id LIMIT 1 FOR UPDATE');
+    $habitCheck->execute([
         'id' => $habitId,
         'user_id' => $userId,
     ]);
-    $habit = $habitStmt->fetch();
 
-    if (!$habit) {
+    if (!$habitCheck->fetch()) {
         db()->rollBack();
         $_SESSION['flash_error'] = 'Hábito não encontrado.';
         header('Location: ' . trackUrl('/index.php?view=track'));
         exit;
     }
 
-    $repetitionLimit = $habit['repetition_limit'] !== null ? (int) $habit['repetition_limit'] : null;
-    $repetitionCount = (int) $habit['repetition_count'];
-
-    if ($repetitionLimit !== null && $repetitionCount >= $repetitionLimit) {
-        db()->rollBack();
-        $_SESSION['flash_error'] = 'Esse hábito já atingiu o limite de repetições.';
-        header('Location: ' . trackUrl('/index.php?view=track'));
-        exit;
-    }
-
     $updateStmt = db()->prepare(
         'UPDATE habits
-         SET repetition_count = repetition_count + 1
+         SET subjectivities = :subjectivities
          WHERE id = :id AND user_id = :user_id'
     );
     $updateStmt->execute([
+        'subjectivities' => $subjectivities !== '' ? $subjectivities : null,
         'id' => $habitId,
         'user_id' => $userId,
     ]);
 
     db()->commit();
-    $_SESSION['flash_success'] = 'Repetição marcada com sucesso.';
+
+    $_SESSION['flash_success'] = 'Subjetividades atualizadas com sucesso.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 } catch (Throwable $exception) {
@@ -89,7 +75,7 @@ try {
         db()->rollBack();
     }
 
-    $_SESSION['flash_error'] = 'Não foi possível marcar a repetição.';
+    $_SESSION['flash_error'] = 'Não foi possível atualizar as subjetividades.';
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 }

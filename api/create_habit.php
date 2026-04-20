@@ -88,6 +88,7 @@ try {
             user_id INT UNSIGNED NOT NULL,
             goal_id INT UNSIGNED NOT NULL,
             title VARCHAR(120) NOT NULL,
+            subjectivities TEXT NULL,
             repetition_limit INT UNSIGNED NULL,
             repetition_count INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -97,8 +98,11 @@ try {
     );
 
     $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('subjectivities', $habitColumns, true)) {
+        db()->exec('ALTER TABLE habits ADD COLUMN subjectivities TEXT NULL AFTER title');
+    }
     if (!in_array('repetition_limit', $habitColumns, true)) {
-        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER notes');
+        db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER subjectivities');
     }
     if (!in_array('repetition_count', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN repetition_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER repetition_limit');
@@ -129,8 +133,8 @@ try {
     $goalId = (int) db()->lastInsertId();
 
     $habitInsert = db()->prepare(
-        'INSERT INTO habits (user_id, goal_id, title, repetition_limit, repetition_count)
-         VALUES (:user_id, :goal_id, :title, :repetition_limit, 0)'
+        'INSERT INTO habits (user_id, goal_id, title, subjectivities, repetition_limit, repetition_count)
+         VALUES (:user_id, :goal_id, :title, NULL, :repetition_limit, 0)'
     );
     $habitInsert->execute([
         'user_id' => $userId,
