@@ -27,8 +27,6 @@ if ($habitId <= 0) {
 }
 
 try {
-    db()->beginTransaction();
-
     $habitColumns = db()->query('SHOW COLUMNS FROM habits')->fetchAll(PDO::FETCH_COLUMN, 0);
     if (!in_array('repetition_limit', $habitColumns, true)) {
         db()->exec('ALTER TABLE habits ADD COLUMN repetition_limit INT UNSIGNED NULL AFTER subjectivities');
@@ -84,6 +82,10 @@ try {
             INDEX idx_habit_events_user_checked_at (user_id, checked_at)
         ) ENGINE=InnoDB'
     );
+
+    // MySQL confirma implicitamente a transação ao executar DDL (ALTER/CREATE).
+    // A transação deve começar somente depois da atualização do schema.
+    db()->beginTransaction();
 
     $habitStmt = db()->prepare(
         'SELECT

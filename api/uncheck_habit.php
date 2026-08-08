@@ -27,6 +27,23 @@ if ($habitId <= 0) {
 }
 
 try {
+    // O CREATE TABLE precisa ocorrer antes da transação: DDL provoca commit
+    // implícito no MySQL, mesmo quando a tabela já existe.
+    db()->exec(
+        'CREATE TABLE IF NOT EXISTS habit_repetition_events (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            habit_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            checked_at DATETIME NOT NULL,
+            note VARCHAR(255) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_habit_events_habit FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE,
+            CONSTRAINT fk_habit_events_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_habit_events_habit_checked_at (habit_id, checked_at),
+            INDEX idx_habit_events_user_checked_at (user_id, checked_at)
+        ) ENGINE=InnoDB'
+    );
+
     db()->beginTransaction();
 
     $habitStmt = db()->prepare(
@@ -66,21 +83,6 @@ try {
         'id' => $habitId,
         'user_id' => $userId,
     ]);
-
-    db()->exec(
-        'CREATE TABLE IF NOT EXISTS habit_repetition_events (
-            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            habit_id INT UNSIGNED NOT NULL,
-            user_id INT UNSIGNED NOT NULL,
-            checked_at DATETIME NOT NULL,
-            note VARCHAR(255) NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT fk_habit_events_habit FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE,
-            CONSTRAINT fk_habit_events_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            INDEX idx_habit_events_habit_checked_at (habit_id, checked_at),
-            INDEX idx_habit_events_user_checked_at (user_id, checked_at)
-        ) ENGINE=InnoDB'
-    );
 
     $deleteEventStmt = db()->prepare(
         'DELETE FROM habit_repetition_events
