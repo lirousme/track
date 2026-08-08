@@ -518,9 +518,21 @@ $computeNextDueAt = static function (array $habit): ?DateTimeImmutable {
                 <input id="edit_intraday_window_start" name="intraday_window_start" type="time" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Início">
                 <input id="edit_intraday_window_end" name="intraday_window_end" type="time" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-brand focus:outline-none" placeholder="Fim">
             </div>
-            <div class="flex justify-end gap-3">
-                <button type="button" id="cancelSubjectivitiesModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
-                <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar alterações</button>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <button
+                    type="submit"
+                    formaction="<?= htmlspecialchars(trackUrl('/api/delete_habit.php'), ENT_QUOTES, 'UTF-8'); ?>"
+                    formmethod="POST"
+                    formnovalidate
+                    onclick="return confirm('Tem certeza de que deseja excluir este hábito? Esta ação não pode ser desfeita.');"
+                    class="rounded-lg border border-rose-500/50 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20"
+                >
+                    Excluir hábito
+                </button>
+                <div class="flex gap-3">
+                    <button type="button" id="cancelSubjectivitiesModal" class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Cancelar</button>
+                    <button type="submit" class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-slate-900 hover:brightness-110">Salvar alterações</button>
+                </div>
             </div>
         </form>
     </div>
