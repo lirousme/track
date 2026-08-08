@@ -261,7 +261,41 @@ try {
         db()->rollBack();
     }
 
-    $_SESSION['flash_error'] = 'Não foi possível marcar a repetição.';
+    $errorCode = (string) $exception->getCode();
+    $errorDetail = trim($exception->getMessage());
+
+    if ($exception instanceof PDOException && isset($exception->errorInfo[2])) {
+        $driverDetail = trim((string) $exception->errorInfo[2]);
+        if ($driverDetail !== '') {
+            $errorDetail = $driverDetail;
+        }
+    }
+
+    $errorDetail = preg_replace('/\s+/', ' ', $errorDetail) ?? '';
+    if ($errorDetail === '') {
+        $errorDetail = 'O servidor encontrou um erro interno sem detalhes adicionais.';
+    }
+
+    // Mantém a mensagem útil na interface sem permitir que uma resposta do banco
+    // excessivamente longa quebre o layout. O erro completo continua no log.
+    if (function_exists('mb_strimwidth')) {
+        $visibleErrorDetail = mb_strimwidth($errorDetail, 0, 300, '…', 'UTF-8');
+    } else {
+        $visibleErrorDetail = strlen($errorDetail) > 300
+            ? substr($errorDetail, 0, 297) . '...'
+            : $errorDetail;
+    }
+
+    error_log(sprintf(
+        'Falha ao marcar repetição do hábito %d para o usuário %d [%s]: %s',
+        $habitId,
+        $userId,
+        $errorCode !== '' ? $errorCode : 'sem código',
+        $exception->getMessage()
+    ));
+
+    $codeSuffix = $errorCode !== '' ? ' (código ' . $errorCode . ')' : '';
+    $_SESSION['flash_error'] = 'Não foi possível marcar a repetição. Motivo: ' . $visibleErrorDetail . $codeSuffix;
     header('Location: ' . trackUrl('/index.php?view=track'));
     exit;
 }
